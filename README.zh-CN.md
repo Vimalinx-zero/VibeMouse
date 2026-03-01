@@ -221,4 +221,9 @@ python -m pip check
 
 ## License
 
-本项目依赖 SenseVoice/FunASR/OpenVINO 等上游组件，分别遵循各自许可证。
+VibeMouse 项目源码采用 Apache-2.0 许可证，详见 `LICENSE`。
+
+第三方依赖与模型资产声明见 `THIRD_PARTY_NOTICES.md`。
+
+在分发二进制或打包模型前，请重点复核 LGPL 依赖（`pynput`、`PyGObject`）
+的合规要求，并确认你实际使用的模型 ID 对应许可证。

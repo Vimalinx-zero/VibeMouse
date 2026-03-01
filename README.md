@@ -223,4 +223,9 @@ python -m pip check
 
 ## License
 
-This project uses upstream dependencies (SenseVoice/FunASR/OpenVINO, etc.) under their respective licenses.
+VibeMouse source code is licensed under Apache-2.0. See `LICENSE`.
+
+Third-party and model-asset notices are documented in `THIRD_PARTY_NOTICES.md`.
+
+Before redistributing binaries or bundled models, review LGPL obligations
+(`pynput`, `PyGObject`) and verify the exact license of the model IDs you ship.
