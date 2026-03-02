@@ -207,7 +207,9 @@ def load_config() -> AppConfig:
         sample_rate=sample_rate,
         channels=channels,
         dtype=os.getenv("VIBEMOUSE_DTYPE", "float32"),
-        transcriber_backend=os.getenv("VIBEMOUSE_BACKEND", "auto").strip().lower(),
+        transcriber_backend=os.getenv("VIBEMOUSE_BACKEND", "funasr_onnx")
+        .strip()
+        .lower(),
         model_name=os.getenv("VIBEMOUSE_MODEL", "iic/SenseVoiceSmall"),
         device=os.getenv("VIBEMOUSE_DEVICE", "cpu"),
         language=os.getenv("VIBEMOUSE_LANGUAGE", "auto"),

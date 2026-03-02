@@ -65,10 +65,15 @@ pip install -e .
 ### Run
 
 ```bash
-export VIBEMOUSE_BACKEND=auto
+export VIBEMOUSE_BACKEND=funasr_onnx
 export VIBEMOUSE_DEVICE=cpu
 vibemouse
 ```
+
+Default install is ONNX-first for smaller deployment footprint.
+
+- Optional PyTorch backend (GPU/advanced fallback): `pip install -e ".[pt]"`
+- Optional Intel NPU dependencies: `pip install -e ".[npu]"`
 
 ### One-command auto deploy (recommended)
 

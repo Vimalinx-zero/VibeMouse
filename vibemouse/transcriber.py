@@ -47,7 +47,7 @@ class SenseVoiceTranscriber:
                 return
 
             raise RuntimeError(
-                f"Unsupported backend {backend!r}. Use auto, funasr, or funasr_onnx."
+                f"Unsupported backend {backend!r}. Use funasr_onnx, auto, or funasr."
             )
 
     def _build_auto_backend(self) -> None:
@@ -65,7 +65,7 @@ class SenseVoiceTranscriber:
                 except Exception as fallback_error:
                     errors.append(f"funasr: {fallback_error}")
 
-        else:
+        elif self._looks_like_cuda_device(self._config.device):
             try:
                 self._build_funasr_backend()
                 return
@@ -76,6 +76,17 @@ class SenseVoiceTranscriber:
                     return
                 except Exception as fallback_error:
                     errors.append(f"funasr_onnx: {fallback_error}")
+        else:
+            try:
+                self._build_funasr_onnx_backend()
+                return
+            except Exception as error:
+                errors.append(f"funasr_onnx: {error}")
+                try:
+                    self._build_funasr_backend()
+                    return
+                except Exception as fallback_error:
+                    errors.append(f"funasr: {fallback_error}")
 
         raise RuntimeError(
             "Failed to initialize any transcriber backend. " + " | ".join(errors)
@@ -97,6 +108,11 @@ class SenseVoiceTranscriber:
     def _looks_like_intel_npu_device(device: str) -> bool:
         normalized = device.strip().lower()
         return normalized.startswith("npu") or normalized.startswith("openvino:npu")
+
+    @staticmethod
+    def _looks_like_cuda_device(device: str) -> bool:
+        normalized = device.strip().lower()
+        return normalized.startswith("cuda")
 
 
 class _FunASRBackend:
@@ -237,7 +253,7 @@ class _FunASRONNXBackend:
                 postprocess = self._load_postprocess()
             except Exception as error:
                 raise RuntimeError(
-                    "funasr_onnx backend requires funasr-onnx and funasr packages"
+                    "funasr_onnx backend requires funasr-onnx package"
                 ) from error
 
             requested_path = self._resolve_onnx_model_dir()
@@ -370,11 +386,14 @@ class _FunASRONNXBackend:
 
     @staticmethod
     def _load_postprocess() -> _PostprocessFn:
-        post_module = importlib.import_module("funasr.utils.postprocess_utils")
-        return cast(
-            _PostprocessFn,
-            getattr(post_module, "rich_transcription_postprocess"),
-        )
+        try:
+            post_module = importlib.import_module("funasr.utils.postprocess_utils")
+            return cast(
+                _PostprocessFn,
+                getattr(post_module, "rich_transcription_postprocess"),
+            )
+        except Exception:
+            return lambda text: text
 
 
 class _TranscriberProtocol(Protocol):

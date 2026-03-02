@@ -13,6 +13,7 @@ class LoadConfigTests(unittest.TestCase):
             config = load_config()
 
         self.assertFalse(config.trust_remote_code)
+        self.assertEqual(config.transcriber_backend, "funasr_onnx")
         self.assertFalse(config.auto_paste)
         self.assertFalse(config.gestures_enabled)
         self.assertEqual(config.gesture_trigger_button, "rear")
@@ -42,6 +43,12 @@ class LoadConfigTests(unittest.TestCase):
             config = load_config()
 
         self.assertTrue(config.trust_remote_code)
+
+    def test_backend_can_be_overridden(self) -> None:
+        with patch.dict(os.environ, {"VIBEMOUSE_BACKEND": "funasr"}, clear=True):
+            config = load_config()
+
+        self.assertEqual(config.transcriber_backend, "funasr")
 
     def test_auto_paste_can_be_enabled(self) -> None:
         with patch.dict(os.environ, {"VIBEMOUSE_AUTO_PASTE": "true"}, clear=True):

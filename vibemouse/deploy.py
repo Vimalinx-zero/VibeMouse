@@ -159,7 +159,7 @@ def build_deploy_env(
     openclaw_retries: int | None,
 ) -> dict[str, str]:
     base = {
-        "VIBEMOUSE_BACKEND": "auto",
+        "VIBEMOUSE_BACKEND": "funasr_onnx",
         "VIBEMOUSE_DEVICE": "cpu",
         "VIBEMOUSE_FALLBACK_CPU": "true",
         "VIBEMOUSE_ENTER_MODE": "enter",

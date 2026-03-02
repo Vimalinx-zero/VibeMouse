@@ -26,6 +26,7 @@ class DeployHelpersTests(unittest.TestCase):
         self.assertEqual(
             env_map["VIBEMOUSE_OPENCLAW_COMMAND"], "openclaw --profile prod"
         )
+        self.assertEqual(env_map["VIBEMOUSE_BACKEND"], "funasr_onnx")
         self.assertEqual(env_map["VIBEMOUSE_OPENCLAW_AGENT"], "ops")
         self.assertEqual(env_map["VIBEMOUSE_OPENCLAW_RETRIES"], "5")
         self.assertEqual(env_map["VIBEMOUSE_BUTTON_DEBOUNCE_MS"], "120")

@@ -22,11 +22,17 @@ dependencies = [
   "evdev>=1.7.1",
   "PyGObject>=3.46.0",
   "pyperclip>=1.9.0",
-  "funasr>=1.2.6",
   "funasr-onnx>=0.4.1",
   "onnxruntime>=1.24.0",
-  "openvino>=2026.0.0",
   "modelscope>=1.18.0",
+]
+
+[project.optional-dependencies]
+pt = [
+  "funasr>=1.2.6",
+]
+npu = [
+  "openvino>=2026.0.0",
 ]
 
 [project.scripts]
