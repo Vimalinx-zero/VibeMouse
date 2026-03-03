@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 from pathlib import Path
 from threading import Lock
 from typing import Protocol, cast
@@ -393,7 +394,24 @@ class _FunASRONNXBackend:
                 getattr(post_module, "rich_transcription_postprocess"),
             )
         except Exception:
-            return lambda text: text
+            try:
+                post_module = importlib.import_module(
+                    "funasr_onnx.utils.postprocess_utils"
+                )
+                return cast(
+                    _PostprocessFn,
+                    getattr(post_module, "rich_transcription_postprocess"),
+                )
+            except Exception:
+                return _strip_sensevoice_control_tokens
+
+
+_SENSEVOICE_CONTROL_TOKEN_RE = re.compile(r"<\|[^|>]+\|>")
+
+
+def _strip_sensevoice_control_tokens(text: str) -> str:
+    cleaned = _SENSEVOICE_CONTROL_TOKEN_RE.sub("", text)
+    return " ".join(cleaned.split()).strip()
 
 
 class _TranscriberProtocol(Protocol):
