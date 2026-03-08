@@ -10,6 +10,7 @@ from vibemouse.system_integration import (
     NoopSystemIntegration,
     create_system_integration,
     detect_hyprland_session,
+    is_browser_window_payload,
     is_terminal_window_payload,
     probe_send_enter_via_atspi,
     probe_text_input_focus_via_atspi,
@@ -144,6 +145,22 @@ class HyprlandSystemIntegrationTests(unittest.TestCase):
             "title": "ChatGPT",
         }
         self.assertFalse(is_terminal_window_payload(payload))
+
+    def test_browser_payload_detection_by_class_hint(self) -> None:
+        payload = {
+            "class": "zen-browser",
+            "initialClass": "zen",
+            "title": "ChatGPT",
+        }
+        self.assertTrue(is_browser_window_payload(payload))
+
+    def test_browser_payload_detection_false_for_terminal_window(self) -> None:
+        payload = {
+            "class": "foot",
+            "initialClass": "foot",
+            "title": "shell",
+        }
+        self.assertFalse(is_browser_window_payload(payload))
 
     def test_probe_text_input_focus_returns_true_when_script_outputs_one(self) -> None:
         with patch(

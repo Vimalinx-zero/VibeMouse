@@ -13,6 +13,43 @@ def _noop_button() -> None:
     return
 
 
+class _NeutralSystemIntegration:
+    is_hyprland = True
+
+    def active_window(self) -> dict[str, object] | None:
+        return None
+
+    def send_shortcut(self, *, mod: str, key: str) -> bool:
+        del mod, key
+        return False
+
+    def cursor_position(self) -> tuple[int, int] | None:
+        return None
+
+    def move_cursor(self, *, x: int, y: int) -> bool:
+        del x, y
+        return False
+
+    def switch_workspace(self, direction: str) -> bool:
+        del direction
+        return False
+
+    def is_text_input_focused(self) -> bool | None:
+        return None
+
+    def send_enter_via_accessibility(self) -> bool | None:
+        return None
+
+    def is_terminal_window_active(self) -> bool | None:
+        return False
+
+    def paste_shortcuts(
+        self, *, terminal_active: bool
+    ) -> tuple[tuple[str, str], ...]:
+        del terminal_active
+        return ()
+
+
 class SideButtonListenerGestureTests(unittest.TestCase):
     @staticmethod
     def _classify(dx: int, dy: int, threshold_px: int) -> str | None:
@@ -369,6 +406,153 @@ class SideButtonListenerGestureTests(unittest.TestCase):
 
         dispatch_click_async.assert_called_once_with("rear")
 
+    def test_consume_right_trigger_release_skips_replay_after_small_drag(
+        self,
+    ) -> None:
+        listener = SideButtonListener(
+            on_front_press=_noop_button,
+            on_rear_press=_noop_button,
+            front_button="x1",
+            rear_button="x2",
+            gestures_enabled=True,
+            gesture_trigger_button="right",
+        )
+
+        setattr(listener, "_right_trigger_pressed", True)
+        setattr(listener, "_right_trigger_pressed_since", 100.0)
+        setattr(listener, "_right_trigger_pending_dx", 20)
+        setattr(listener, "_right_trigger_pending_dy", 10)
+        setattr(listener, "_button_grabbed_label", "right")
+
+        consume = cast(
+            Callable[[], tuple[bool, str | None]],
+            getattr(listener, "_consume_right_trigger_release"),
+        )
+        with (
+            patch("vibemouse.mouse_listener.time.monotonic", return_value=100.1),
+            patch.object(listener, "_end_button_suppress") as end_suppress,
+        ):
+            should_replay, gesture_direction = consume()
+
+        self.assertFalse(should_replay)
+        self.assertIsNone(gesture_direction)
+        end_suppress.assert_called_once_with(button_label="right")
+        self.assertFalse(cast(bool, getattr(listener, "_right_trigger_pressed")))
+
+
+    def test_begin_right_trigger_press_passthroughs_native_wayland_browser(
+        self,
+    ) -> None:
+        class _BrowserSystemIntegration:
+            is_hyprland = True
+
+            def active_window(self) -> dict[str, object] | None:
+                return {
+                    "class": "zen-browser",
+                    "initialClass": "zen",
+                    "title": "ChatGPT",
+                    "xwayland": False,
+                }
+
+            def send_shortcut(self, *, mod: str, key: str) -> bool:
+                del mod, key
+                return False
+
+            def cursor_position(self) -> tuple[int, int] | None:
+                return None
+
+            def move_cursor(self, *, x: int, y: int) -> bool:
+                del x, y
+                return False
+
+            def switch_workspace(self, direction: str) -> bool:
+                del direction
+                return False
+
+            def is_text_input_focused(self) -> bool | None:
+                return None
+
+            def send_enter_via_accessibility(self) -> bool | None:
+                return None
+
+            def is_terminal_window_active(self) -> bool | None:
+                return False
+
+            def paste_shortcuts(
+                self, *, terminal_active: bool
+            ) -> tuple[tuple[str, str], ...]:
+                del terminal_active
+                return ()
+
+        listener = SideButtonListener(
+            on_front_press=_noop_button,
+            on_rear_press=_noop_button,
+            front_button="x1",
+            rear_button="x2",
+            gestures_enabled=True,
+            gesture_trigger_button="right",
+            system_integration=_BrowserSystemIntegration(),
+        )
+
+        begin = cast(Callable[..., None], getattr(listener, "_begin_right_trigger_press"))
+
+        with patch.object(listener, "_begin_button_suppress") as begin_suppress:
+            begin(initial_position=(1, 2))
+
+        self.assertTrue(cast(bool, getattr(listener, "_right_trigger_passthrough")))
+        self.assertTrue(cast(bool, getattr(listener, "_right_trigger_pressed")))
+        begin_suppress.assert_not_called()
+
+    def test_passthrough_right_gesture_dispatches_on_large_move(self) -> None:
+        listener = SideButtonListener(
+            on_front_press=_noop_button,
+            on_rear_press=_noop_button,
+            front_button="x1",
+            rear_button="x2",
+            gestures_enabled=True,
+            gesture_trigger_button="right",
+        )
+
+        setattr(listener, "_right_trigger_pressed", True)
+        setattr(listener, "_right_trigger_passthrough", True)
+        setattr(listener, "_right_trigger_pending_dx", 120)
+
+        maybe_dispatch = cast(
+            Callable[[], bool],
+            getattr(listener, "_maybe_dispatch_passthrough_right_gesture"),
+        )
+        with patch.object(listener, "_dispatch_gesture") as dispatch_gesture:
+            self.assertTrue(maybe_dispatch())
+
+        dispatch_gesture.assert_called_once_with("right")
+        self.assertFalse(cast(bool, getattr(listener, "_right_trigger_pressed")))
+        self.assertFalse(cast(bool, getattr(listener, "_right_trigger_passthrough")))
+
+    def test_consume_right_trigger_release_passthrough_returns_no_replay(
+        self,
+    ) -> None:
+        listener = SideButtonListener(
+            on_front_press=_noop_button,
+            on_rear_press=_noop_button,
+            front_button="x1",
+            rear_button="x2",
+            gestures_enabled=True,
+            gesture_trigger_button="right",
+        )
+
+        setattr(listener, "_right_trigger_passthrough", True)
+        consume = cast(
+            Callable[[], tuple[bool, str | None]],
+            getattr(listener, "_consume_right_trigger_release"),
+        )
+
+        should_replay, gesture_direction = consume()
+
+        self.assertFalse(should_replay)
+        self.assertIsNone(gesture_direction)
+        self.assertFalse(cast(bool, getattr(listener, "_right_trigger_passthrough")))
+
+
     def test_stale_gesture_capture_force_releases_grab(self) -> None:
         listener = SideButtonListener(
             on_front_press=_noop_button,
@@ -397,7 +581,9 @@ class SideButtonListenerGestureTests(unittest.TestCase):
         self.assertEqual(fake_device.ungrab_calls, 1)
         self.assertFalse(cast(bool, getattr(listener, "_gesture_active")))
 
-    def test_stale_right_gesture_releases_button_suppress_grab(self) -> None:
+    def test_stale_right_hold_keeps_button_suppress_grab_before_timeout(
+        self,
+    ) -> None:
         listener = SideButtonListener(
             on_front_press=_noop_button,
             on_rear_press=_noop_button,
@@ -409,20 +595,49 @@ class SideButtonListenerGestureTests(unittest.TestCase):
 
         fake_device = _GrabDeviceStub()
         begin = cast(Callable[..., None], getattr(listener, "_begin_button_suppress"))
-        start_capture = cast(
-            Callable[..., None], getattr(listener, "_start_gesture_capture")
-        )
         release_stale = cast(
-            Callable[[], None], getattr(listener, "_release_stale_gesture_capture")
+            Callable[[], None], getattr(listener, "_release_stale_button_grab")
         )
 
-        begin(source_device=fake_device, button_label="right")
-        start_capture(source_device=fake_device, button_label="right")
-        setattr(listener, "_gesture_grab_timeout_s", 0.0)
-        release_stale()
+        setattr(listener, "_right_trigger_pressed", True)
+        setattr(listener, "_right_trigger_pressed_since", 100.0)
+        with patch("vibemouse.mouse_listener.time.monotonic", return_value=100.0):
+            begin(source_device=fake_device, button_label="right")
+        with patch("vibemouse.mouse_listener.time.monotonic", return_value=105.0):
+            release_stale()
+
+        self.assertEqual(fake_device.ungrab_calls, 0)
+        self.assertIs(getattr(listener, "_button_grabbed_device"), fake_device)
+
+    def test_stale_right_hold_releases_button_suppress_grab_after_timeout(
+        self,
+    ) -> None:
+        listener = SideButtonListener(
+            on_front_press=_noop_button,
+            on_rear_press=_noop_button,
+            front_button="x1",
+            rear_button="x2",
+            gestures_enabled=True,
+            gesture_trigger_button="right",
+        )
+
+        fake_device = _GrabDeviceStub()
+        begin = cast(Callable[..., None], getattr(listener, "_begin_button_suppress"))
+        release_stale = cast(
+            Callable[[], None], getattr(listener, "_release_stale_button_grab")
+        )
+
+        setattr(listener, "_right_trigger_pressed", True)
+        setattr(listener, "_right_trigger_pressed_since", 100.0)
+        with patch("vibemouse.mouse_listener.time.monotonic", return_value=100.0):
+            begin(source_device=fake_device, button_label="right")
+        with patch("vibemouse.mouse_listener.time.monotonic", return_value=108.1):
+            release_stale()
 
         self.assertEqual(fake_device.ungrab_calls, 1)
         self.assertIsNone(getattr(listener, "_button_grabbed_device"))
+        self.assertFalse(cast(bool, getattr(listener, "_right_trigger_pressed")))
+
 
     def test_back_forward_aliases_match_x1_x2(self) -> None:
         class _FakeEvent:
@@ -573,9 +788,7 @@ class SideButtonListenerGestureTests(unittest.TestCase):
             run_evdev = cast(Callable[[], None], getattr(listener, "_run_evdev"))
             run_evdev()
 
-    def test_right_trigger_gesture_does_not_suppress_native_right_click(
-        self,
-    ) -> None:
+    def test_right_trigger_tap_replays_right_click_after_release(self) -> None:
         class _FakeEvent:
             def __init__(self, event_type: int, code: int, value: int) -> None:
                 self.type = event_type
@@ -636,6 +849,7 @@ class SideButtonListenerGestureTests(unittest.TestCase):
             rear_button="x2",
             gestures_enabled=True,
             gesture_trigger_button="right",
+            system_integration=_NeutralSystemIntegration(),
         )
 
         def _import_module(name: str):
@@ -643,7 +857,12 @@ class SideButtonListenerGestureTests(unittest.TestCase):
                 return fake_module
             return _real_import_module(name)
 
-        def _finish_capture_and_stop(button_label: str) -> None:
+        def _mark_begin(*, source_device: object, button_label: str) -> None:
+            self.assertIs(source_device, fake_device)
+            self.assertEqual(button_label, "right")
+            setattr(listener, "_button_grabbed_label", "right")
+
+        def _dispatch_and_stop(button_label: str) -> None:
             self.assertEqual(button_label, "right")
             listener._stop.set()
 
@@ -653,133 +872,59 @@ class SideButtonListenerGestureTests(unittest.TestCase):
                 side_effect=_import_module,
             ),
             patch("select.select", return_value=([88], [], [])),
-            patch.object(listener, "_start_gesture_capture") as start_capture,
             patch.object(
                 listener,
-                "_finish_gesture_capture",
-                side_effect=_finish_capture_and_stop,
-            ) as finish_capture,
-            patch.object(listener, "_begin_button_suppress") as begin_suppress,
+                "_begin_button_suppress",
+                side_effect=_mark_begin,
+            ) as begin_suppress,
             patch.object(listener, "_end_button_suppress") as end_suppress,
+            patch.object(listener, "_dispatch_gesture") as dispatch_gesture,
+            patch.object(
+                listener,
+                "_dispatch_click_async",
+                side_effect=_dispatch_and_stop,
+            ) as dispatch_click_async,
         ):
             run_evdev = cast(Callable[[], None], getattr(listener, "_run_evdev"))
             run_evdev()
 
-        self.assertEqual(start_capture.call_count, 0)
-        finish_capture.assert_called_once_with("right")
-        self.assertEqual(begin_suppress.call_count, 0)
-        self.assertEqual(end_suppress.call_count, 0)
+        self.assertEqual(begin_suppress.call_count, 1)
+        end_suppress.assert_called_once_with(button_label="right")
+        dispatch_gesture.assert_not_called()
+        dispatch_click_async.assert_called_once_with("right")
 
-    def test_right_trigger_release_finishes_capture_without_suppress_calls(self) -> None:
-        class _FakeEvent:
-            def __init__(self, event_type: int, code: int, value: int) -> None:
-                self.type = event_type
-                self.code = code
-                self.value = value
 
-        class _FakeDevice:
-            def __init__(self, events: list[_FakeEvent], key_cap: list[int]) -> None:
-                self.fd = 89
-                self._events = events
-                self._key_cap = key_cap
-
-            def capabilities(self) -> dict[int, list[int]]:
-                return {1: self._key_cap}
-
-            def read(self) -> list[_FakeEvent]:
-                events = self._events
-                self._events = []
-                return events
-
-            def close(self) -> None:
-                return
-
-        right_code = 273
-        events = [_FakeEvent(1, right_code, 1), _FakeEvent(1, right_code, 0)]
-        fake_device = _FakeDevice(events=events, key_cap=[272, 273, 275, 276])
-
-        fake_ecodes = type(
-            "_Ecodes",
-            (),
-            {
-                "BTN_SIDE": 275,
-                "BTN_EXTRA": 276,
-                "BTN_BACK": 278,
-                "BTN_FORWARD": 277,
-                "BTN_LEFT": 272,
-                "BTN_RIGHT": right_code,
-                "EV_KEY": 1,
-                "EV_REL": 2,
-                "REL_X": 0,
-                "REL_Y": 1,
-            },
-        )
-        fake_module = type(
-            "_EvdevModule",
-            (),
-            {
-                "InputDevice": lambda _path: fake_device,
-                "ecodes": fake_ecodes,
-                "list_devices": lambda: ["/dev/input/event-right-order"],
-            },
-        )
-
+    def test_consume_right_trigger_release_skips_replay_after_hold(self) -> None:
         listener = SideButtonListener(
-            on_front_press=lambda: None,
-            on_rear_press=lambda: None,
+            on_front_press=_noop_button,
+            on_rear_press=_noop_button,
             front_button="x1",
             rear_button="x2",
             gestures_enabled=True,
             gesture_trigger_button="right",
         )
 
-        def _import_module(name: str):
-            if name == "evdev":
-                return fake_module
-            return _real_import_module(name)
+        setattr(listener, "_right_trigger_pressed", True)
+        setattr(listener, "_right_trigger_pressed_since", 100.0)
+        setattr(listener, "_button_grabbed_label", "right")
 
-        timeline: list[str] = []
-
-        def _mark_begin(*, source_device: object, button_label: str) -> None:
-            del source_device
-            del button_label
-            timeline.append("begin")
-
-        def _mark_start(*, source_device: object, button_label: str) -> None:
-            del source_device
-            del button_label
-            timeline.append("start")
-
-        def _mark_end(*, button_label: str) -> None:
-            del button_label
-            timeline.append("end")
-
-        def _mark_finish(button_label: str) -> None:
-            self.assertEqual(button_label, "right")
-            timeline.append("finish")
-            listener._stop.set()
-
+        consume = cast(
+            Callable[[], tuple[bool, str | None]],
+            getattr(listener, "_consume_right_trigger_release"),
+        )
         with (
-            patch(
-                "vibemouse.mouse_listener.importlib.import_module",
-                side_effect=_import_module,
-            ),
-            patch("select.select", return_value=([89], [], [])),
-            patch.object(
-                listener,
-                "_begin_button_suppress",
-                side_effect=_mark_begin,
-            ),
-            patch.object(listener, "_start_gesture_capture", side_effect=_mark_start),
-            patch.object(listener, "_end_button_suppress", side_effect=_mark_end),
-            patch.object(listener, "_finish_gesture_capture", side_effect=_mark_finish),
+            patch("vibemouse.mouse_listener.time.monotonic", return_value=100.5),
+            patch.object(listener, "_end_button_suppress") as end_suppress,
         ):
-            run_evdev = cast(Callable[[], None], getattr(listener, "_run_evdev"))
-            run_evdev()
+            should_replay, gesture_direction = consume()
 
-        self.assertEqual(timeline, ["finish"])
+        self.assertFalse(should_replay)
+        self.assertIsNone(gesture_direction)
+        end_suppress.assert_called_once_with(button_label="right")
+        self.assertFalse(cast(bool, getattr(listener, "_right_trigger_pressed")))
 
-    def test_right_trigger_starts_capture_only_after_move(self) -> None:
+
+    def test_right_trigger_dispatches_gesture_after_large_move(self) -> None:
         class _FakeEvent:
             def __init__(self, event_type: int, code: int, value: int) -> None:
                 self.type = event_type
@@ -845,6 +990,7 @@ class SideButtonListenerGestureTests(unittest.TestCase):
             rear_button="x2",
             gestures_enabled=True,
             gesture_trigger_button="right",
+            system_integration=_NeutralSystemIntegration(),
         )
 
         def _import_module(name: str):
@@ -854,14 +1000,19 @@ class SideButtonListenerGestureTests(unittest.TestCase):
 
         timeline: list[str] = []
 
-        def _mark_start(*, source_device: object, button_label: str) -> None:
-            del source_device
+        def _mark_begin(*, source_device: object, button_label: str) -> None:
+            self.assertIs(source_device, fake_device)
             self.assertEqual(button_label, "right")
-            timeline.append("start")
+            setattr(listener, "_button_grabbed_label", "right")
+            timeline.append("begin")
 
-        def _mark_finish(button_label: str) -> None:
+        def _mark_end(*, button_label: str) -> None:
             self.assertEqual(button_label, "right")
-            timeline.append("finish")
+            timeline.append("end")
+
+        def _mark_gesture(direction: str) -> None:
+            self.assertEqual(direction, "right")
+            timeline.append("gesture")
             listener._stop.set()
 
         with (
@@ -870,19 +1021,27 @@ class SideButtonListenerGestureTests(unittest.TestCase):
                 side_effect=_import_module,
             ),
             patch("select.select", return_value=([90], [], [])),
-            patch.object(listener, "_start_gesture_capture", side_effect=_mark_start),
-            patch.object(listener, "_finish_gesture_capture", side_effect=_mark_finish),
-            patch.object(listener, "_begin_button_suppress") as begin_suppress,
-            patch.object(listener, "_end_button_suppress") as end_suppress,
+            patch.object(
+                listener,
+                "_begin_button_suppress",
+                side_effect=_mark_begin,
+            ),
+            patch.object(listener, "_end_button_suppress", side_effect=_mark_end),
+            patch.object(listener, "_dispatch_gesture", side_effect=_mark_gesture),
+            patch.object(listener, "_dispatch_click_async") as dispatch_click_async,
+            patch.object(listener, "_start_gesture_capture") as start_capture,
+            patch.object(listener, "_finish_gesture_capture") as finish_capture,
         ):
             run_evdev = cast(Callable[[], None], getattr(listener, "_run_evdev"))
             run_evdev()
 
-        self.assertEqual(timeline, ["start", "finish"])
-        self.assertEqual(begin_suppress.call_count, 0)
-        self.assertEqual(end_suppress.call_count, 0)
+        self.assertEqual(timeline, ["begin", "end", "gesture"])
+        dispatch_click_async.assert_not_called()
+        start_capture.assert_not_called()
+        finish_capture.assert_not_called()
 
-    def test_front_click_path_uses_button_suppress_grab(self) -> None:
+
+    def test_front_click_path_skips_button_suppress_grab(self) -> None:
         class _FakeEvent:
             def __init__(self, event_type: int, code: int, value: int) -> None:
                 self.type = event_type
@@ -966,11 +1125,8 @@ class SideButtonListenerGestureTests(unittest.TestCase):
             run_evdev()
 
         self.assertEqual(callbacks, ["front"])
-        begin_suppress.assert_called_once_with(
-            source_device=fake_device,
-            button_label="front",
-        )
-        end_suppress.assert_called_once_with(button_label="front")
+        begin_suppress.assert_not_called()
+        end_suppress.assert_not_called()
 
 
 class _GrabDeviceStub:

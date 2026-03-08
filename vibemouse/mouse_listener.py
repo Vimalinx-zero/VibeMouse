@@ -9,7 +9,11 @@ import time
 from collections.abc import Callable
 from typing import Protocol, cast
 
-from vibemouse.system_integration import SystemIntegration, create_system_integration
+from vibemouse.system_integration import (
+    SystemIntegration,
+    create_system_integration,
+    is_browser_window_payload,
+)
 
 
 ButtonCallback = Callable[[], None]
@@ -75,6 +79,14 @@ class SideButtonListener:
         self._button_grabbed_since: float | None = None
         self._button_grab_deadline_monotonic: float | None = None
         self._button_grab_timeout_s: float = 0.22
+        self._right_trigger_pressed_since: float | None = None
+        self._right_trigger_pending_dx: int = 0
+        self._right_trigger_pending_dy: int = 0
+        self._right_trigger_origin_position: tuple[int, int] | None = None
+        self._right_trigger_passthrough: bool = False
+        self._right_tap_timeout_s: float = 0.30
+        self._right_click_slop_px: int = 8
+        self._right_hold_suppress_timeout_s: float = 8.0
         self._stop: threading.Event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -87,7 +99,7 @@ class SideButtonListener:
 
     def stop(self) -> None:
         self._stop.set()
-        self._right_trigger_pressed = False
+        self._clear_right_trigger_state()
         self._release_button_grab()
         self._release_gesture_grab()
         if self._thread is not None:
@@ -246,10 +258,18 @@ class SideButtonListener:
                             ):
                                 if button_label == "right":
                                     if event.value == 1:
-                                        self._right_trigger_pressed = True
+                                        self._begin_right_trigger_press(
+                                            source_device=dev,
+                                        )
                                     elif event.value == 0:
-                                        self._right_trigger_pressed = False
-                                        self._finish_gesture_capture(button_label)
+                                        (
+                                            should_replay_right_click,
+                                            gesture_direction,
+                                        ) = self._consume_right_trigger_release()
+                                        if gesture_direction is not None:
+                                            self._dispatch_gesture(gesture_direction)
+                                        elif should_replay_right_click:
+                                            self._dispatch_click_async(button_label)
                                 else:
                                     if event.value == 1:
                                         self._start_gesture_capture(
@@ -261,17 +281,18 @@ class SideButtonListener:
                                 continue
 
                             if event.value == 1:
-                                self._begin_button_suppress(
-                                    source_device=dev,
-                                    button_label=button_label,
-                                )
+                                if button_label == "right":
+                                    self._begin_button_suppress(
+                                        source_device=dev,
+                                        button_label=button_label,
+                                    )
                                 _LOG.debug(
                                     "Mouse click detected: label=%s code=%s",
                                     button_label,
                                     event.code,
                                 )
                                 self._dispatch_click_async(button_label)
-                            elif event.value == 0:
+                            elif event.value == 0 and button_label == "right":
                                 self._end_button_suppress(button_label=button_label)
                             continue
 
@@ -279,13 +300,14 @@ class SideButtonListener:
                             if (
                                 self._gesture_trigger_button == "right"
                                 and self._right_trigger_pressed
-                                and not self._gesture_active
-                                and event.value != 0
                             ):
-                                self._start_gesture_capture(
-                                    source_device=dev,
-                                    button_label="right",
-                                )
+                                if event.code == ecodes.REL_X:
+                                    self._right_trigger_pending_dx += event.value
+                                elif event.code == ecodes.REL_Y:
+                                    self._right_trigger_pending_dy += event.value
+                                if self._maybe_dispatch_passthrough_right_gesture():
+                                    continue
+                                continue
                             if not self._gesture_active:
                                 continue
                             if event.code == ecodes.REL_X:
@@ -293,7 +315,7 @@ class SideButtonListener:
                             elif event.code == ecodes.REL_Y:
                                 self._accumulate_gesture_delta(dx=0, dy=event.value)
         finally:
-            self._right_trigger_pressed = False
+            self._clear_right_trigger_state()
             self._release_button_grab()
             self._release_gesture_grab()
             for dev in devices:
@@ -332,10 +354,16 @@ class SideButtonListener:
             if self._gestures_enabled and self._is_gesture_trigger_button(button_label):
                 if button_label == "right":
                     if pressed:
-                        self._right_trigger_pressed = True
+                        self._begin_right_trigger_press(initial_position=(x, y))
                     else:
-                        self._right_trigger_pressed = False
-                        self._finish_gesture_capture(button_label)
+                        (
+                            should_replay_right_click,
+                            gesture_direction,
+                        ) = self._consume_right_trigger_release()
+                        if gesture_direction is not None:
+                            self._dispatch_gesture(gesture_direction)
+                        elif should_replay_right_click:
+                            self._dispatch_click_async(button_label)
                 else:
                     if pressed:
                         self._start_gesture_capture(
@@ -352,15 +380,16 @@ class SideButtonListener:
         def on_move(x: int, y: int) -> None:
             if not self._gestures_enabled:
                 return
-            if (
-                self._gesture_trigger_button == "right"
-                and self._right_trigger_pressed
-                and not self._gesture_active
-            ):
-                self._start_gesture_capture(
-                    initial_position=(x, y),
-                    button_label="right",
-                )
+            if self._gesture_trigger_button == "right" and self._right_trigger_pressed:
+                origin = self._right_trigger_origin_position
+                if origin is None:
+                    self._right_trigger_origin_position = (x, y)
+                    return
+                self._right_trigger_pending_dx = x - origin[0]
+                self._right_trigger_pending_dy = y - origin[1]
+                if self._maybe_dispatch_passthrough_right_gesture():
+                    return
+                return
             self._accumulate_gesture_position(x, y)
 
         listener = listener_ctor(on_click=on_click, on_move=on_move)
@@ -376,7 +405,7 @@ class SideButtonListener:
                     return
                 time.sleep(0.2)
         finally:
-            self._right_trigger_pressed = False
+            self._clear_right_trigger_state()
             listener.stop()
 
     def _dispatch_click(self, button_label: str) -> None:
@@ -385,6 +414,9 @@ class SideButtonListener:
             return
         if button_label == "rear":
             self._dispatch_rear_press()
+            return
+        if button_label == "right":
+            self._dispatch_right_click()
             return
 
     def _dispatch_click_async(self, button_label: str) -> None:
@@ -403,6 +435,108 @@ class SideButtonListener:
 
     def _is_gesture_trigger_button(self, button_label: str) -> bool:
         return button_label == self._gesture_trigger_button
+
+    def _clear_right_trigger_state(self) -> None:
+        self._right_trigger_pressed = False
+        self._right_trigger_pressed_since = None
+        self._right_trigger_pending_dx = 0
+        self._right_trigger_pending_dy = 0
+        self._right_trigger_origin_position = None
+        self._right_trigger_passthrough = False
+
+    def _should_passthrough_right_trigger(self) -> bool:
+        try:
+            payload = self._system_integration.active_window()
+        except Exception:
+            return False
+
+        if payload is None or not is_browser_window_payload(payload):
+            return False
+
+        xwayland = payload.get("xwayland")
+        return xwayland is False
+
+    def _begin_right_trigger_press(
+        self,
+        *,
+        source_device: _EvdevDevice | None = None,
+        initial_position: tuple[int, int] | None = None,
+    ) -> None:
+        self._clear_right_trigger_state()
+        self._right_trigger_pressed = True
+        self._right_trigger_pressed_since = time.monotonic()
+        self._right_trigger_origin_position = initial_position
+        if self._should_passthrough_right_trigger():
+            self._right_trigger_passthrough = True
+            return
+
+        if source_device is not None:
+            self._begin_button_suppress(
+                source_device=source_device,
+                button_label="right",
+            )
+
+    def _maybe_dispatch_passthrough_right_gesture(self) -> bool:
+        if not self._right_trigger_passthrough:
+            return False
+
+        direction = self._classify_gesture(
+            self._right_trigger_pending_dx,
+            self._right_trigger_pending_dy,
+            self._gesture_threshold_px,
+        )
+        if direction is None:
+            return False
+
+        self._dispatch_gesture(direction)
+        self._clear_right_trigger_state()
+        return True
+
+    def _consume_right_trigger_release(self) -> tuple[bool, str | None]:
+        if self._right_trigger_passthrough:
+            self._clear_right_trigger_state()
+            return False, None
+
+        now = time.monotonic()
+        pressed_since = self._right_trigger_pressed_since
+        direction = self._classify_gesture(
+            self._right_trigger_pending_dx,
+            self._right_trigger_pending_dy,
+            self._gesture_threshold_px,
+        )
+        movement_px = max(
+            abs(self._right_trigger_pending_dx),
+            abs(self._right_trigger_pending_dy),
+        )
+        suppressed_native_click = self._button_grabbed_label == "right"
+
+        if suppressed_native_click:
+            self._end_button_suppress(button_label="right")
+
+        should_replay = (
+            direction is None
+            and suppressed_native_click
+            and pressed_since is not None
+            and now - pressed_since <= self._right_tap_timeout_s
+            and movement_px <= self._right_click_slop_px
+        )
+        self._clear_right_trigger_state()
+        return should_replay, direction
+
+    def _dispatch_right_click(self) -> None:
+        mouse_module = importlib.import_module("pynput.mouse")
+        controller_ctor = cast(
+            _MouseControllerCtor,
+            getattr(cast(object, mouse_module), "Controller"),
+        )
+        button_holder = cast(
+            _MouseButtonHolder,
+            getattr(cast(object, mouse_module), "Button"),
+        )
+        controller = controller_ctor()
+        controller.press(button_holder.right)
+        time.sleep(0.012)
+        controller.release(button_holder.right)
 
     def _start_gesture_capture(
         self,
@@ -464,7 +598,7 @@ class SideButtonListener:
             self._gesture_started_since = None
             self._gesture_trigger_label = None
             if button_label == "right":
-                self._right_trigger_pressed = False
+                self._clear_right_trigger_state()
             anchor_cursor = self._gesture_anchor_cursor
             self._gesture_anchor_cursor = None
 
@@ -479,6 +613,8 @@ class SideButtonListener:
             direction,
         )
         if direction is None:
+            if button_label == "right":
+                return
             self._dispatch_click_async(button_label)
             return
         self._dispatch_gesture(direction)
@@ -539,12 +675,13 @@ class SideButtonListener:
             return
 
         grabbed_since = time.monotonic()
+        timeout_s = self._button_grab_timeout_s
+        if button_label == "right":
+            timeout_s = max(timeout_s, self._right_hold_suppress_timeout_s)
         self._button_grabbed_device = source_device
         self._button_grabbed_label = button_label
         self._button_grabbed_since = grabbed_since
-        self._button_grab_deadline_monotonic = (
-            grabbed_since + self._button_grab_timeout_s
-        )
+        self._button_grab_deadline_monotonic = grabbed_since + timeout_s
 
     def _end_button_suppress(self, *, button_label: str) -> None:
         if self._button_grabbed_label != button_label:
@@ -576,11 +713,33 @@ class SideButtonListener:
         deadline = self._button_grab_deadline_monotonic
         if deadline is None:
             return
-        if time.monotonic() < deadline:
+
+        now = time.monotonic()
+        if self._button_grabbed_label == "right" and self._right_trigger_pressed:
+            pressed_since = self._right_trigger_pressed_since
+            if (
+                pressed_since is not None
+                and now - pressed_since < self._right_hold_suppress_timeout_s
+            ):
+                return
+            _LOG.warning(
+                "Right-button hold timeout reached (%.2fs); force-releasing mouse grab",
+                self._right_hold_suppress_timeout_s,
+            )
+            self._clear_right_trigger_state()
+            self._release_button_grab()
             return
+
+        if now < deadline:
+            return
+
+        timeout_s = self._button_grab_timeout_s
+        grabbed_since = self._button_grabbed_since
+        if grabbed_since is not None:
+            timeout_s = max(0.0, deadline - grabbed_since)
         _LOG.warning(
             "Button suppress timeout reached (%.2fs); force-releasing mouse grab",
-            self._button_grab_timeout_s,
+            timeout_s,
         )
         self._release_button_grab()
 
@@ -605,7 +764,7 @@ class SideButtonListener:
             stale_label = self._gesture_trigger_label
             self._gesture_trigger_label = None
             if stale_label == "right":
-                self._right_trigger_pressed = False
+                self._clear_right_trigger_state()
 
         _LOG.warning(
             "Gesture capture timeout reached (%.2fs); force-releasing input grabs (trigger=%s)",
@@ -769,3 +928,17 @@ class _MouseListenerCtor(Protocol):
         on_click: Callable[[int, int, object, bool], None],
         on_move: Callable[[int, int], None] | None = None,
     ) -> _MouseListener: ...
+
+
+class _MouseController(Protocol):
+    def press(self, button: object) -> None: ...
+
+    def release(self, button: object) -> None: ...
+
+
+class _MouseControllerCtor(Protocol):
+    def __call__(self) -> _MouseController: ...
+
+
+class _MouseButtonHolder(Protocol):
+    right: object

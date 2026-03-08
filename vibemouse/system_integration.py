@@ -41,6 +41,23 @@ _TERMINAL_TITLE_HINTS: set[str] = {
     "cmd.exe",
 }
 
+_BROWSER_CLASS_HINTS: set[str] = {
+    "firefox",
+    "zen",
+    "librewolf",
+    "waterfox",
+    "floorp",
+    "chromium",
+    "google-chrome",
+    "chrome",
+    "brave-browser",
+    "microsoft-edge",
+    "vivaldi",
+    "opera",
+    "thorium",
+    "browser",
+}
+
 
 def is_terminal_window_payload(payload: Mapping[str, object]) -> bool:
     window_class = str(payload.get("class", "")).lower()
@@ -53,6 +70,19 @@ def is_terminal_window_payload(payload: Mapping[str, object]) -> bool:
         return True
 
     return any(hint in title for hint in _TERMINAL_TITLE_HINTS)
+
+
+def is_browser_window_payload(payload: Mapping[str, object]) -> bool:
+    window_class = str(payload.get("class", "")).lower()
+    initial_class = str(payload.get("initialClass", "")).lower()
+    title = str(payload.get("title", "")).lower()
+
+    if any(
+        hint in window_class or hint in initial_class for hint in _BROWSER_CLASS_HINTS
+    ):
+        return True
+
+    return "browser" in title or "chrome" in title or "firefox" in title
 
 
 class SystemIntegration(Protocol):
