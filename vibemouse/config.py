@@ -23,6 +23,19 @@ def _read_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer, got {raw!r}") from error
 
 
+def _read_optional_int(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    normalized = raw.strip()
+    if not normalized:
+        return None
+    try:
+        return int(normalized)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from error
+
+
 def _read_float(name: str, default: float) -> float:
     raw = os.getenv(name)
     if raw is None:
@@ -111,6 +124,7 @@ class AppConfig:
     front_button: str
     rear_button: str
     record_hotkey_keycodes: tuple[int, ...]
+    recording_submit_keycode: int | None
     temp_dir: Path
 
 
@@ -157,6 +171,14 @@ def load_config() -> AppConfig:
     )
     if len(record_hotkey_keycodes) != 3:
         raise ValueError("VIBEMOUSE_RECORD_HOTKEY_CODE_1/2/3 must be distinct")
+    recording_submit_keycode = _read_optional_int(
+        "VIBEMOUSE_RECORDING_SUBMIT_KEYCODE"
+    )
+    if recording_submit_keycode is not None:
+        recording_submit_keycode = _require_non_negative(
+            "VIBEMOUSE_RECORDING_SUBMIT_KEYCODE",
+            recording_submit_keycode,
+        )
     if front_button == rear_button:
         raise ValueError("VIBEMOUSE_FRONT_BUTTON and VIBEMOUSE_REAR_BUTTON must differ")
     button_debounce_ms = _require_non_negative(
@@ -269,5 +291,6 @@ def load_config() -> AppConfig:
         front_button=front_button,
         rear_button=rear_button,
         record_hotkey_keycodes=record_hotkey_keycodes,
+        recording_submit_keycode=recording_submit_keycode,
         temp_dir=temp_dir,
     )

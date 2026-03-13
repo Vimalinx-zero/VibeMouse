@@ -226,6 +226,56 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
                     self.assertEqual(worker_calls, [])
                     self.assertEqual(send_enter_calls, ["enter"])
 
+    def test_recording_submit_press_stops_recording_and_routes_to_openclaw(self) -> None:
+        subject = self._make_subject()
+        recording = SimpleNamespace(duration_s=0.7, path=Path("/tmp/submit.wav"))
+        setattr(
+            subject,
+            "_recorder",
+            SimpleNamespace(is_recording=True, stop_and_save=lambda: recording),
+        )
+        setattr(subject, "_config", SimpleNamespace(enter_mode="enter"))
+
+        status_values: list[bool] = []
+        worker_calls: list[tuple[object, str]] = []
+        send_enter_calls: list[str] = []
+        setattr(
+            subject, "_set_recording_status", lambda value: status_values.append(value)
+        )
+        setattr(
+            subject,
+            "_start_transcription_worker",
+            lambda rec, *, output_target: worker_calls.append((rec, output_target)),
+        )
+        setattr(
+            subject,
+            "_output",
+            SimpleNamespace(send_enter=lambda mode: send_enter_calls.append(mode)),
+        )
+
+        on_submit = cast(
+            Callable[[], None], getattr(subject, "_on_recording_submit_press")
+        )
+        on_submit()
+
+        self.assertEqual(status_values, [False])
+        self.assertEqual(worker_calls, [(recording, "openclaw")])
+        self.assertEqual(send_enter_calls, [])
+
+    def test_recording_submit_press_is_ignored_when_idle(self) -> None:
+        subject = self._make_subject()
+        setattr(subject, "_recorder", SimpleNamespace(is_recording=False))
+
+        rear_calls: list[bool] = []
+        setattr(subject, "_on_rear_press", lambda: rear_calls.append(True))
+
+        on_submit = cast(
+            Callable[[], None], getattr(subject, "_on_recording_submit_press")
+        )
+        on_submit()
+
+        self.assertEqual(rear_calls, [])
+
     def test_transcribe_and_output_openclaw_uses_openclaw_sender(self) -> None:
         subject = self._make_subject()
         recording = SimpleNamespace(duration_s=1.0, path=Path("/tmp/transcribe.wav"))

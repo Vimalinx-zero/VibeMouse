@@ -36,6 +36,7 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.front_button, "x1")
         self.assertEqual(config.rear_button, "x2")
         self.assertEqual(config.record_hotkey_keycodes, (42, 125, 193))
+        self.assertIsNone(config.recording_submit_keycode)
 
     def test_record_hotkey_keycodes_can_be_configured(self) -> None:
         with patch.dict(
@@ -66,6 +67,26 @@ class LoadConfigTests(unittest.TestCase):
                 "VIBEMOUSE_RECORD_HOTKEY_CODE_1/2/3 must be distinct",
             ):
                 _ = load_config()
+
+    def test_recording_submit_keycode_can_be_configured(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VIBEMOUSE_RECORDING_SUBMIT_KEYCODE": "28"},
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.recording_submit_keycode, 28)
+
+    def test_blank_recording_submit_keycode_disables_listener(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"VIBEMOUSE_RECORDING_SUBMIT_KEYCODE": ""},
+            clear=True,
+        ):
+            config = load_config()
+
+        self.assertIsNone(config.recording_submit_keycode)
 
     def test_trust_remote_code_can_be_enabled(self) -> None:
         with patch.dict(

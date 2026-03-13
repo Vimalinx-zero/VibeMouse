@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assistant 键检测页</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4efe7;
+      --bg-accent: #dbe7df;
+      --panel: rgba(255, 252, 247, 0.82);
+      --panel-strong: rgba(255, 249, 239, 0.94);
+      --ink: #17221e;
+      --muted: #5c6b64;
+      --line: rgba(23, 34, 30, 0.1);
+      --hit: #0f766e;
+      --maybe: #b45309;
+      --weak: #7c3aed;
+      --miss: #b42318;
+      --idle: #466163;
+      --shadow: 0 24px 60px rgba(39, 45, 42, 0.14);
+      --radius: 24px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: "Noto Sans SC", "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(255, 255, 255, 0.9), transparent 28%),
+        radial-gradient(circle at top right, rgba(219, 231, 223, 0.95), transparent 34%),
+        linear-gradient(135deg, var(--bg), #efe4d4 54%, #d5e0d8);
+    }
+
+    body {
+      padding: 32px 18px 48px;
+    }
+
+    .shell {
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+
+    .hero {
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    h1, h2, p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(32px, 6vw, 64px);
+      line-height: 0.94;
+      max-width: 10ch;
+    }
+
+    .lede {
+      margin-top: 16px;
+      max-width: 760px;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.7;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      backdrop-filter: blur(16px);
+      box-shadow: var(--shadow);
+      border-radius: var(--radius);
+      padding: 22px;
+    }
+
+    .panel + .panel {
+      margin-top: 18px;
+    }
+
+    .capture {
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(135deg, rgba(255, 248, 235, 0.92), rgba(240, 249, 243, 0.88)),
+        var(--panel-strong);
+      outline: none;
+    }
+
+    .capture:focus-visible {
+      box-shadow:
+        0 0 0 4px rgba(15, 118, 110, 0.22),
+        var(--shadow);
+    }
+
+    .capture::after {
+      content: "";
+      position: absolute;
+      inset: auto -80px -80px auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(15, 118, 110, 0.16), transparent 68%);
+      pointer-events: none;
+    }
+
+    .capture-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .capture-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 16px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(135deg, #183530, #0f766e);
+      box-shadow: 0 12px 24px rgba(15, 118, 110, 0.2);
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    button.secondary {
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.8);
+      box-shadow: inset 0 0 0 1px rgba(23, 34, 30, 0.08);
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    .label {
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 15px;
+      background: rgba(70, 97, 99, 0.12);
+      color: var(--idle);
+    }
+
+    .badge::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 16%, transparent);
+    }
+
+    .badge.hit {
+      color: var(--hit);
+      background: rgba(15, 118, 110, 0.12);
+    }
+
+    .badge.maybe {
+      color: var(--maybe);
+      background: rgba(180, 83, 9, 0.12);
+    }
+
+    .badge.weak {
+      color: var(--weak);
+      background: rgba(124, 58, 237, 0.1);
+    }
+
+    .badge.miss {
+      color: var(--miss);
+      background: rgba(180, 35, 24, 0.1);
+    }
+
+    .status-copy {
+      margin-top: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+      max-width: 72ch;
+    }
+
+    .held-keys {
+      margin-top: 20px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 40px;
+      padding: 8px 12px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(23, 34, 30, 0.08);
+      font-size: 14px;
+    }
+
+    .grid {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 1.12fr 0.88fr;
+      gap: 18px;
+    }
+
+    h2 {
+      font-size: 20px;
+      margin-bottom: 16px;
+    }
+
+    .log {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+      max-height: 520px;
+      overflow: auto;
+    }
+
+    .log li {
+      display: grid;
+      gap: 4px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px solid rgba(23, 34, 30, 0.07);
+    }
+
+    .log strong {
+      font-size: 16px;
+    }
+
+    .log-meta {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .event-kind {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 62px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      margin-right: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      background: rgba(23, 34, 30, 0.08);
+    }
+
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin: 0;
+    }
+
+    .facts div {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(23, 34, 30, 0.07);
+    }
+
+    .facts dt {
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .facts dd {
+      margin: 10px 0 0;
+      font-size: 15px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+
+    .verdict {
+      margin-top: 16px;
+      padding: 18px;
+      border-radius: 18px;
+      border: 1px solid rgba(23, 34, 30, 0.08);
+      background: rgba(255, 255, 255, 0.74);
+    }
+
+    .verdict-title {
+      margin-top: 8px;
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .verdict-copy {
+      margin-top: 8px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .chip-list {
+      list-style: none;
+      margin: 14px 0 0;
+      padding: 0;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .chip-list li {
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: rgba(15, 118, 110, 0.08);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .tips {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 18px 0 6px;
+    }
+
+    @media (max-width: 960px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .capture-head {
+        flex-direction: column;
+      }
+
+      .capture-actions {
+        justify-content: flex-start;
+      }
+
+      .facts {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">Keyboard Probe</p>
+      <h1>Assistant 键检测页</h1>
+      <p class="lede">
+        点击下面的监听区后，按你键盘上怀疑是 AI / Assistant 的那个键。
+        页面会把浏览器收到的 `key`、`code`、修饰键状态和候选判定全部列出来，
+        专门识别 `XF86Assistant`、`F23`，以及被系统展开成 `Shift + Super + F23` 的情况。
+      </p>
+    </header>
+
+    <section class="panel capture" id="captureArea" tabindex="0" aria-label="按键监听区">
+      <div class="capture-head">
+        <div>
+          <p class="label">当前状态</p>
+          <div class="badge" id="statusBadge">等待按键</div>
+          <p class="status-copy" id="statusCopy">
+            先点一下这个区域让页面获得焦点。如果你的桌面环境拦截了助手键，网页可能只能看到 `Shift` / `Meta`，看不到主键本身。
+          </p>
+        </div>
+        <div class="capture-actions">
+          <button type="button" id="focusButton">开始监听</button>
+          <button type="button" class="secondary" id="clearButton">清空历史</button>
+        </div>
+      </div>
+      <div class="held-keys" id="heldKeys">
+        <span class="pill">当前没有按下中的键</span>
+      </div>
+    </section>
+
+    <section class="grid">
+      <section class="panel">
+        <h2>最近事件</h2>
+        <ul class="log" id="eventLog">
+          <li class="empty">还没有收到键盘事件。</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2>最后一次事件详情</h2>
+        <dl class="facts">
+          <div><dt>type</dt><dd id="field-type">-</dd></div>
+          <div><dt>key</dt><dd id="field-key">-</dd></div>
+          <div><dt>code</dt><dd id="field-code">-</dd></div>
+          <div><dt>location</dt><dd id="field-location">-</dd></div>
+          <div><dt>keyCode / which</dt><dd id="field-keyCode">-</dd></div>
+          <div><dt>repeat</dt><dd id="field-repeat">-</dd></div>
+          <div><dt>Shift</dt><dd id="field-shift">-</dd></div>
+          <div><dt>Ctrl</dt><dd id="field-ctrl">-</dd></div>
+          <div><dt>Alt</dt><dd id="field-alt">-</dd></div>
+          <div><dt>Meta(Super)</dt><dd id="field-meta">-</dd></div>
+          <div><dt>NumLock</dt><dd id="field-numlock">-</dd></div>
+          <div><dt>timeStamp</dt><dd id="field-timeStamp">-</dd></div>
+        </dl>
+
+        <div class="verdict" id="verdictBox">
+          <p class="label">候选判定</p>
+          <p class="verdict-title" id="verdictTitle">还没有数据</p>
+          <p class="verdict-copy" id="verdictCopy">
+            收到事件后，这里会显示它是不是你要找的助手键。
+          </p>
+          <ul class="chip-list" id="matchList"></ul>
+        </div>
+      </section>
+    </section>
+
+    <section class="panel">
+      <h2>使用提醒</h2>
+      <ul class="tips">
+        <li>`Meta` 在 Linux 浏览器里通常就是 `Super / Win`。</li>
+        <li>很多系统会把物理助手键映射成 `F23`，有些浏览器再把它命名成 `XF86Assistant`。</li>
+        <li>如果你只看到 `Shift` 和 `Meta`，但一直没有主键事件，通常是桌面环境先把这个键吃掉了。</li>
+      </ul>
+    </section>
+  </main>
+
+  <script>
+    const MAX_EVENTS = 20;
+    const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta"]);
+
+    const state = {
+      events: [],
+      pressed: new Map(),
+      lastEvent: null,
+      lastCandidate: null,
+    };
+
+    const fields = {
+      type: document.getElementById("field-type"),
+      key: document.getElementById("field-key"),
+      code: document.getElementById("field-code"),
+      location: document.getElementById("field-location"),
+      keyCode: document.getElementById("field-keyCode"),
+      repeat: document.getElementById("field-repeat"),
+      shift: document.getElementById("field-shift"),
+      ctrl: document.getElementById("field-ctrl"),
+      alt: document.getElementById("field-alt"),
+      meta: document.getElementById("field-meta"),
+      numlock: document.getElementById("field-numlock"),
+      timeStamp: document.getElementById("field-timeStamp"),
+    };
+
+    const captureArea = document.getElementById("captureArea");
+    const focusButton = document.getElementById("focusButton");
+    const clearButton = document.getElementById("clearButton");
+    const statusBadge = document.getElementById("statusBadge");
+    const statusCopy = document.getElementById("statusCopy");
+    const heldKeys = document.getElementById("heldKeys");
+    const eventLog = document.getElementById("eventLog");
+    const verdictBox = document.getElementById("verdictBox");
+    const verdictTitle = document.getElementById("verdictTitle");
+    const verdictCopy = document.getElementById("verdictCopy");
+    const matchList = document.getElementById("matchList");
+
+    function boolText(value) {
+      return value ? "yes" : "no";
+    }
+
+    function safeValue(value) {
+      if (value === undefined || value === null || value === "") {
+        return "-";
+      }
+      return String(value);
+    }
+
+    function locationLabel(location) {
+      switch (location) {
+        case KeyboardEvent.DOM_KEY_LOCATION_STANDARD:
+          return "standard";
+        case KeyboardEvent.DOM_KEY_LOCATION_LEFT:
+          return "left";
+        case KeyboardEvent.DOM_KEY_LOCATION_RIGHT:
+          return "right";
+        case KeyboardEvent.DOM_KEY_LOCATION_NUMPAD:
+          return "numpad";
+        default:
+          return String(location);
+      }
+    }
+
+    function eventIdentity(payload) {
+      return payload.code && payload.code !== "Unidentified"
+        ? payload.code
+        : payload.key || "(unknown)";
+    }
+
+    function formatWhen(ms) {
+      return `${ms.toFixed(1)} ms`;
+    }
+
+    function summarizePayload(payload) {
+      const primary = payload.key || payload.code || "(unknown)";
+      const secondary = payload.code && payload.code !== payload.key ? ` / ${payload.code}` : "";
+      return `${primary}${secondary}`;
+    }
+
+    function detectAssistant(payload) {
+      const matches = [];
+      const key = payload.key;
+      const code = payload.code;
+      const keyCode = payload.keyCode;
+      const meta = payload.meta;
+      const shift = payload.shift;
+
+      if (key === "XF86Assistant") {
+        matches.push("`key = XF86Assistant`");
+      }
+      if (key === "Assistant") {
+        matches.push("`key = Assistant`");
+      }
+      if (code === "F23") {
+        matches.push("`code = F23`");
+      }
+      if (key === "F23") {
+        matches.push("`key = F23`");
+      }
+      if (keyCode === 134) {
+        matches.push("`keyCode = 134`（常见 F23）");
+      }
+      if (shift && meta) {
+        matches.push("检测到 `Shift + Super(Meta)`");
+      }
+
+      const exactAssistant = key === "XF86Assistant" || key === "Assistant";
+      const f23Like = code === "F23" || key === "F23" || keyCode === 134;
+      const unidentifiedCombo = key === "Unidentified" && shift && meta;
+      const modifierLead = MODIFIER_KEYS.has(key) && (shift || meta || payload.ctrl || payload.alt);
+
+      if (exactAssistant || (f23Like && shift && meta)) {
+        return {
+          level: "hit",
+          title: "高度疑似就是助手键",
+          copy: "浏览器已经把它识别成 Assistant/F23 路线，而且带着你日志里那种 Shift + Super 修饰键特征。",
+          matches,
+          candidate: true,
+        };
+      }
+
+      if (f23Like) {
+        return {
+          level: "maybe",
+          title: "像是同一路物理键",
+          copy: "浏览器看到了 F23，但没有直接给出 XF86Assistant。很多系统就是这么映射助手键的。",
+          matches,
+          candidate: true,
+        };
+      }
+
+      if (unidentifiedCombo) {
+        return {
+          level: "weak",
+          title: "可能被系统拦截了主键",
+          copy: "浏览器只拿到了修饰键加一个未识别主键。这通常说明真正的助手键被桌面环境先消费了。",
+          matches,
+          candidate: true,
+        };
+      }
+
+      if (modifierLead) {
+        return {
+          level: "",
+          title: "收到前导修饰键",
+          copy: "这一步本身不算命中。继续看接下来有没有 F23 / XF86Assistant，很多特殊键会先发修饰键再发主键。",
+          matches,
+          candidate: false,
+        };
+      }
+
+      return {
+        level: "miss",
+        title: "当前事件不像助手键",
+        copy: "它不符合 Assistant / F23 这条映射链。你可以继续按别的键对照。",
+        matches,
+        candidate: false,
+      };
+    }
+
+    function setStatus(level, title, copy) {
+      statusBadge.className = "badge";
+      if (level) {
+        statusBadge.classList.add(level);
+      }
+      statusBadge.textContent = title;
+      statusCopy.textContent = copy;
+    }
+
+    function renderHeldKeys() {
+      heldKeys.innerHTML = "";
+      if (state.pressed.size === 0) {
+        const pill = document.createElement("span");
+        pill.className = "pill";
+        pill.textContent = "当前没有按下中的键";
+        heldKeys.appendChild(pill);
+        return;
+      }
+
+      for (const payload of state.pressed.values()) {
+        const pill = document.createElement("span");
+        pill.className = "pill";
+        pill.textContent = summarizePayload(payload);
+        heldKeys.appendChild(pill);
+      }
+    }
+
+    function renderEventLog() {
+      eventLog.innerHTML = "";
+
+      if (state.events.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "empty";
+        empty.textContent = "还没有收到键盘事件。";
+        eventLog.appendChild(empty);
+        return;
+      }
+
+      for (const entry of state.events) {
+        const item = document.createElement("li");
+
+        const title = document.createElement("strong");
+        title.textContent = summarizePayload(entry.payload);
+
+        const meta = document.createElement("div");
+        meta.className = "log-meta";
+        meta.textContent =
+          `${entry.payload.type.toUpperCase()} · keyCode ${entry.payload.keyCode} · ` +
+          `Shift ${boolText(entry.payload.shift)} · Meta ${boolText(entry.payload.meta)} · ` +
+          `${formatWhen(entry.payload.timeStamp)}`;
+
+        const note = document.createElement("div");
+        note.className = "log-meta";
+        note.textContent = entry.analysis.title;
+
+        const prefix = document.createElement("span");
+        prefix.className = "event-kind";
+        prefix.textContent = entry.payload.type;
+        title.prepend(prefix);
+
+        item.appendChild(title);
+        item.appendChild(meta);
+        item.appendChild(note);
+        eventLog.appendChild(item);
+      }
+    }
+
+    function renderFields() {
+      const payload = state.lastEvent;
+      if (!payload) {
+        for (const field of Object.values(fields)) {
+          field.textContent = "-";
+        }
+        return;
+      }
+
+      fields.type.textContent = safeValue(payload.type);
+      fields.key.textContent = safeValue(payload.key);
+      fields.code.textContent = safeValue(payload.code);
+      fields.location.textContent = locationLabel(payload.location);
+      fields.keyCode.textContent = safeValue(payload.keyCode);
+      fields.repeat.textContent = boolText(payload.repeat);
+      fields.shift.textContent = boolText(payload.shift);
+      fields.ctrl.textContent = boolText(payload.ctrl);
+      fields.alt.textContent = boolText(payload.alt);
+      fields.meta.textContent = boolText(payload.meta);
+      fields.numlock.textContent = boolText(payload.numLock);
+      fields.timeStamp.textContent = formatWhen(payload.timeStamp);
+    }
+
+    function renderVerdict() {
+      const source = state.lastCandidate || (state.lastEvent ? {
+        payload: state.lastEvent,
+        analysis: detectAssistant(state.lastEvent),
+      } : null);
+
+      if (!source) {
+        verdictBox.style.borderColor = "rgba(23, 34, 30, 0.08)";
+        verdictTitle.textContent = "还没有数据";
+        verdictCopy.textContent = "收到事件后，这里会显示它是不是你要找的助手键。";
+        matchList.innerHTML = "";
+        return;
+      }
+
+      const { analysis, payload } = source;
+      verdictTitle.textContent = analysis.title;
+      verdictCopy.textContent = `${analysis.copy} 最后命中的事件是 ${summarizePayload(payload)}。`;
+      matchList.innerHTML = "";
+
+      const accent = {
+        hit: "rgba(15, 118, 110, 0.28)",
+        maybe: "rgba(180, 83, 9, 0.26)",
+        weak: "rgba(124, 58, 237, 0.24)",
+        miss: "rgba(180, 35, 24, 0.22)",
+      }[analysis.level] || "rgba(23, 34, 30, 0.08)";
+
+      verdictBox.style.borderColor = accent;
+
+      const chips = analysis.matches.length > 0
+        ? analysis.matches
+        : ["没有命中特定 Assistant/F23 特征"];
+
+      for (const match of chips) {
+        const chip = document.createElement("li");
+        chip.textContent = match;
+        matchList.appendChild(chip);
+      }
+    }
+
+    function refreshStatus() {
+      if (state.lastCandidate) {
+        setStatus(
+          state.lastCandidate.analysis.level,
+          state.lastCandidate.analysis.title,
+          `${state.lastCandidate.analysis.copy} 继续按键时，这个状态会保留到你手动清空历史。`
+        );
+        return;
+      }
+
+      if (state.lastEvent) {
+        const analysis = detectAssistant(state.lastEvent);
+        setStatus(
+          analysis.level,
+          analysis.title,
+          analysis.copy
+        );
+        return;
+      }
+
+      setStatus(
+        "",
+        "等待按键",
+        "先点一下这个区域让页面获得焦点。如果你的桌面环境拦截了助手键，网页可能只能看到 `Shift` / `Meta`，看不到主键本身。"
+      );
+    }
+
+    function render() {
+      renderHeldKeys();
+      renderEventLog();
+      renderFields();
+      renderVerdict();
+      refreshStatus();
+    }
+
+    function snapshotEvent(event) {
+      return {
+        type: event.type,
+        key: event.key,
+        code: event.code,
+        location: event.location,
+        keyCode: Number(event.keyCode || event.which || 0),
+        repeat: event.repeat,
+        shift: event.shiftKey,
+        ctrl: event.ctrlKey,
+        alt: event.altKey,
+        meta: event.metaKey,
+        numLock: event.getModifierState ? event.getModifierState("NumLock") : false,
+        timeStamp: Number(event.timeStamp || 0),
+      };
+    }
+
+    function handleKeyEvent(event) {
+      const payload = snapshotEvent(event);
+      const identity = eventIdentity(payload);
+
+      state.lastEvent = payload;
+
+      if (event.type === "keydown") {
+        state.pressed.set(identity, payload);
+      } else if (event.type === "keyup") {
+        state.pressed.delete(identity);
+      }
+
+      const analysis = detectAssistant(payload);
+      const entry = { payload, analysis };
+      state.events.unshift(entry);
+      state.events = state.events.slice(0, MAX_EVENTS);
+
+      if (analysis.candidate) {
+        state.lastCandidate = entry;
+      }
+
+      render();
+    }
+
+    function clearAll() {
+      state.events = [];
+      state.pressed.clear();
+      state.lastEvent = null;
+      state.lastCandidate = null;
+      render();
+    }
+
+    function focusCapture() {
+      captureArea.focus();
+    }
+
+    focusButton.addEventListener("click", focusCapture);
+    clearButton.addEventListener("click", clearAll);
+    captureArea.addEventListener("click", focusCapture);
+    window.addEventListener("keydown", handleKeyEvent, true);
+    window.addEventListener("keyup", handleKeyEvent, true);
+    window.addEventListener("blur", () => {
+      state.pressed.clear();
+      renderHeldKeys();
+    });
+
+    render();
+  </script>
+</body>
+</html>

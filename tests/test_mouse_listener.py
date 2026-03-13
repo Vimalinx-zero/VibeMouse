@@ -1041,7 +1041,7 @@ class SideButtonListenerGestureTests(unittest.TestCase):
         finish_capture.assert_not_called()
 
 
-    def test_front_click_path_skips_button_suppress_grab(self) -> None:
+    def test_front_click_path_does_not_use_button_suppress_grab(self) -> None:
         class _FakeEvent:
             def __init__(self, event_type: int, code: int, value: int) -> None:
                 self.type = event_type

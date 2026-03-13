@@ -179,10 +179,27 @@ class TextOutput:
         ):
             return
 
-        self._kb.press(self._ctrl_key)
-        self._kb.press("v")
-        self._kb.release("v")
-        self._kb.release(self._ctrl_key)
+        self._send_ctrl_v_via_keyboard()
+
+    def _send_ctrl_v_via_keyboard(self) -> None:
+        pressed_ctrl = False
+        pressed_v = False
+        try:
+            self._kb.press(self._ctrl_key)
+            pressed_ctrl = True
+            self._kb.press("v")
+            pressed_v = True
+        finally:
+            if pressed_v:
+                try:
+                    self._kb.release("v")
+                except Exception:
+                    pass
+            if pressed_ctrl:
+                try:
+                    self._kb.release(self._ctrl_key)
+                except Exception:
+                    pass
 
     def _send_ctrl_shift_v_via_keyboard(self) -> bool:
         pressed_ctrl = False
@@ -244,11 +261,25 @@ class TextOutput:
         self._kb.release(key)
 
     def _tap_modified_key(self, modifier: object, key: object) -> None:
-        self._kb.press(modifier)
-        self._kb.press(key)
-        time.sleep(0.012)
-        self._kb.release(key)
-        self._kb.release(modifier)
+        pressed_modifier = False
+        pressed_key = False
+        try:
+            self._kb.press(modifier)
+            pressed_modifier = True
+            self._kb.press(key)
+            pressed_key = True
+            time.sleep(0.012)
+        finally:
+            if pressed_key:
+                try:
+                    self._kb.release(key)
+                except Exception:
+                    pass
+            if pressed_modifier:
+                try:
+                    self._kb.release(modifier)
+                except Exception:
+                    pass
 
     def _send_enter_via_atspi(self) -> bool:
         try:

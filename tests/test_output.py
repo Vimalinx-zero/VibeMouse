@@ -11,12 +11,18 @@ from vibemouse.output import TextOutput
 
 
 class _FakeKeyboardController:
-    def __init__(self, *, fail_on_press: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on_press: bool = False,
+        fail_on_press_key: object | None = None,
+    ) -> None:
         self.events: list[tuple[str, object]] = []
         self._fail_on_press: bool = fail_on_press
+        self._fail_on_press_key: object | None = fail_on_press_key
 
     def press(self, key: object) -> None:
-        if self._fail_on_press:
+        if self._fail_on_press or key == self._fail_on_press_key:
             raise RuntimeError("press failed")
         self.events.append(("press", key))
 
@@ -614,6 +620,39 @@ class TextOutputRoutingTests(unittest.TestCase):
             ],
         )
 
+    def test_auto_paste_ctrl_v_failure_releases_ctrl_and_falls_back_to_clipboard(
+        self,
+    ) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController(fail_on_press_key="v")
+        self._bind_keyboard(subject, keyboard)
+        setattr(subject, "_is_text_input_focused", self._not_focused)
+        setattr(subject, "_hyprland_session", False)
+        setattr(
+            subject,
+            "_system_integration",
+            SimpleNamespace(
+                send_shortcut=lambda mod, key: False,
+                is_terminal_window_active=lambda: False,
+                paste_shortcuts=lambda terminal_active: (),
+                send_enter_via_accessibility=lambda: None,
+                is_text_input_focused=lambda: None,
+            ),
+        )
+
+        with patch("vibemouse.output.pyperclip.copy") as copy_mock:
+            route = subject.inject_or_clipboard("hello", auto_paste=True)
+
+        self.assertEqual(route, "clipboard")
+        self.assertEqual(copy_mock.call_count, 1)
+        self.assertEqual(
+            keyboard.events,
+            [
+                ("press", "CTRL"),
+                ("release", "CTRL"),
+            ],
+        )
+
     def test_hyprland_terminal_detection_by_window_class(self) -> None:
         subject = self._make_subject()
         keyboard = _FakeKeyboardController()
@@ -823,6 +862,22 @@ class TextOutputRoutingTests(unittest.TestCase):
                 ("press", "CTRL"),
                 ("press", "ENTER"),
                 ("release", "ENTER"),
+                ("release", "CTRL"),
+            ],
+        )
+
+    def test_send_enter_ctrl_enter_failure_releases_modifier(self) -> None:
+        subject = self._make_subject()
+        keyboard = _FakeKeyboardController(fail_on_press_key="ENTER")
+        self._bind_keyboard(subject, keyboard)
+
+        with self.assertRaisesRegex(RuntimeError, "press failed"):
+            subject.send_enter(mode="ctrl_enter")
+
+        self.assertEqual(
+            keyboard.events,
+            [
+                ("press", "CTRL"),
                 ("release", "CTRL"),
             ],
         )

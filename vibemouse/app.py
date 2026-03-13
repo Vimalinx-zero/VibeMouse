@@ -60,6 +60,13 @@ class VoiceMouseApp:
             keycodes=config.record_hotkey_keycodes,
             debounce_s=config.button_debounce_ms / 1000.0,
         )
+        self._recording_submit_listener: KeyboardHotkeyListener | None = None
+        if config.recording_submit_keycode is not None:
+            self._recording_submit_listener = KeyboardHotkeyListener(
+                on_hotkey=self._on_recording_submit_press,
+                keycodes=(config.recording_submit_keycode,),
+                debounce_s=config.button_debounce_ms / 1000.0,
+            )
         self._stop_event: threading.Event = threading.Event()
         self._transcribe_lock: threading.Lock = threading.Lock()
         self._workers_lock: threading.Lock = threading.Lock()
@@ -69,7 +76,10 @@ class VoiceMouseApp:
     def run(self) -> None:
         self._listener.start()
         self._keyboard_listener.start()
+        if self._recording_submit_listener is not None:
+            self._recording_submit_listener.start()
         self._set_recording_status(False)
+        recording_submit_hotkey = self._config.recording_submit_keycode
         _LOG.info(
             "VibeMouse ready. "
             + f"Model={self._config.model_name}, preferred_device={self._config.device}, "
@@ -77,6 +87,7 @@ class VoiceMouseApp:
             + f"enter_mode={self._config.enter_mode}, debounce_ms={self._config.button_debounce_ms}, "
             + f"front_button={self._config.front_button}, rear_button={self._config.rear_button}, "
             + f"record_hotkey_keycodes={self._config.record_hotkey_keycodes}, "
+            + f"recording_submit_keycode={recording_submit_hotkey}, "
             + f"gestures_enabled={self._config.gestures_enabled}, "
             + f"gesture_trigger={self._config.gesture_trigger_button}, "
             + f"gesture_threshold_px={self._config.gesture_threshold_px}, "
@@ -97,6 +108,8 @@ class VoiceMouseApp:
     def shutdown(self) -> None:
         self._listener.stop()
         self._keyboard_listener.stop()
+        if self._recording_submit_listener is not None:
+            self._recording_submit_listener.stop()
         self._recorder.cancel()
         self._set_recording_status(False)
         with self._workers_lock:
@@ -158,6 +171,12 @@ class VoiceMouseApp:
                 _LOG.info("Enter key sent")
         except Exception as error:
             _LOG.exception("Failed to send Enter: %s", error)
+
+    def _on_recording_submit_press(self) -> None:
+        if not self._recorder.is_recording:
+            return
+        _LOG.info("Recording submit hotkey pressed, routing to rear-button logic")
+        self._on_rear_press()
 
     def _on_gesture(self, direction: str) -> None:
         action = self._resolve_gesture_action(direction)
