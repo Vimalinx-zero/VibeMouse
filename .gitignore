@@ -1,7 +1,16 @@
 .venv/
+.venv-*/
 .ruff_cache/
+.pytest_cache/
+.mypy_cache/
 tmp/
 iic/
-vibemouse.egg-info/
+build/
+dist/
+*.egg-info/
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Temporary platform port-integration snapshots kept under repo root
+/windows-port/
+/windows-port-*/

@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package and CI dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --no-deps -e .
+          python - <<'PY'
+          import pathlib
+          import subprocess
+          import sys
+          import tomllib
+
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+          deps = data["project"]["optional-dependencies"]["ci"]
+          subprocess.check_call([sys.executable, "-m", "pip", "install", *deps])
+          PY
+
+      - name: Run tests
+        run: pytest

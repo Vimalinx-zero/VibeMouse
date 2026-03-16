@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 import threading
@@ -8,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from vibemouse.audio import AudioRecorder, AudioRecording
-from vibemouse.config import AppConfig
+from vibemouse.config import AppConfig, write_status
 from vibemouse.keyboard_listener import KeyboardHotkeyListener
 from vibemouse.mouse_listener import SideButtonListener
 from vibemouse.output import TextOutput
@@ -398,11 +397,7 @@ class VoiceMouseApp:
             "recording": is_recording,
             "state": "recording" if is_recording else "idle",
         }
-        path = self._config.status_file
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            _ = tmp_path.write_text(json.dumps(payload), encoding="utf-8")
-            _ = tmp_path.replace(path)
+            write_status(self._config.status_file, payload)
         except Exception:
             return

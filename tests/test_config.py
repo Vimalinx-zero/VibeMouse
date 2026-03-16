@@ -174,7 +174,10 @@ class LoadConfigTests(unittest.TestCase):
         ):
             config = load_config()
 
-        self.assertEqual(str(config.status_file), "/tmp/custom-vibemouse-status.json")
+        self.assertEqual(
+            config.status_file.as_posix(),
+            "/tmp/custom-vibemouse-status.json",
+        )
 
     def test_enter_mode_can_be_configured(self) -> None:
         with patch.dict(os.environ, {"VIBEMOUSE_ENTER_MODE": "ctrl_enter"}, clear=True):
