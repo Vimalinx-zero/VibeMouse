@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Literal
@@ -24,6 +25,7 @@ from vibemouse.core.commands import (
 from vibemouse.config import AppConfig, write_status
 from vibemouse.core.output import TextOutput
 from vibemouse.core.transcriber import SenseVoiceTranscriber
+from vibemouse.ipc.server import IPCServer
 from vibemouse.listener.keyboard_listener import KeyboardHotkeyListener
 from vibemouse.listener.mouse_listener import SideButtonListener
 from vibemouse.platform.system_integration import (
@@ -32,16 +34,25 @@ from vibemouse.platform.system_integration import (
 )
 
 
+ListenerMode = Literal["inline", "child", "off"]
 TranscriptionTarget = Literal["default", "openclaw"]
 _LOG = logging.getLogger(__name__)
 
 
 class VoiceMouseApp:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        listener_mode: ListenerMode = "inline",
+        config_path: Path | str | None = None,
+    ) -> None:
         if config.front_button == config.rear_button:
             raise ValueError("Front and rear side buttons must be different")
 
         self._config: AppConfig = config
+        self._listener_mode: ListenerMode = listener_mode
+        self._config_path: Path | None = Path(config_path) if config_path else None
         self._system_integration: SystemIntegration = create_system_integration()
         self._recorder: AudioRecorder = AudioRecorder(
             sample_rate=config.sample_rate,
@@ -58,32 +69,42 @@ class VoiceMouseApp:
             openclaw_retries=config.openclaw_retries,
         )
         self._binding_resolver: BindingResolver = BindingResolver.from_config(config)
-        self._listener: SideButtonListener = SideButtonListener(
-            on_event=self._handle_input_event,
-            front_button=config.front_button,
-            rear_button=config.rear_button,
-            debounce_s=config.button_debounce_ms / 1000.0,
-            gestures_enabled=config.gestures_enabled,
-            gesture_trigger_button=config.gesture_trigger_button,
-            gesture_threshold_px=config.gesture_threshold_px,
-            gesture_freeze_pointer=config.gesture_freeze_pointer,
-            gesture_restore_cursor=config.gesture_restore_cursor,
-            system_integration=self._system_integration,
-        )
-        self._keyboard_listener: KeyboardHotkeyListener = KeyboardHotkeyListener(
-            on_event=self._handle_input_event,
-            event_name=EVENT_HOTKEY_RECORD_TOGGLE,
-            keycodes=config.record_hotkey_keycodes,
-            debounce_s=config.button_debounce_ms / 1000.0,
-        )
+        self._listener: SideButtonListener | None = None
+        self._keyboard_listener: KeyboardHotkeyListener | None = None
         self._recording_submit_listener: KeyboardHotkeyListener | None = None
-        if config.recording_submit_keycode is not None:
-            self._recording_submit_listener = KeyboardHotkeyListener(
+        self._ipc_server: IPCServer | None = None
+        self._listener_process: subprocess.Popen | None = None
+
+        if listener_mode == "inline":
+            self._listener = SideButtonListener(
                 on_event=self._handle_input_event,
-                event_name=EVENT_HOTKEY_RECORDING_SUBMIT,
-                keycodes=(config.recording_submit_keycode,),
+                front_button=config.front_button,
+                rear_button=config.rear_button,
+                debounce_s=config.button_debounce_ms / 1000.0,
+                gestures_enabled=config.gestures_enabled,
+                gesture_trigger_button=config.gesture_trigger_button,
+                gesture_threshold_px=config.gesture_threshold_px,
+                gesture_freeze_pointer=config.gesture_freeze_pointer,
+                gesture_restore_cursor=config.gesture_restore_cursor,
+                system_integration=self._system_integration,
+            )
+            self._keyboard_listener = KeyboardHotkeyListener(
+                on_event=self._handle_input_event,
+                event_name=EVENT_HOTKEY_RECORD_TOGGLE,
+                keycodes=config.record_hotkey_keycodes,
                 debounce_s=config.button_debounce_ms / 1000.0,
             )
+            if config.recording_submit_keycode is not None:
+                self._recording_submit_listener = KeyboardHotkeyListener(
+                    on_event=self._handle_input_event,
+                    event_name=EVENT_HOTKEY_RECORDING_SUBMIT,
+                    keycodes=(config.recording_submit_keycode,),
+                    debounce_s=config.button_debounce_ms / 1000.0,
+                )
+        elif listener_mode == "child":
+            pass  # IPC server and subprocess started in run()
+        # listener_mode == "off": no listeners
+
         self._stop_event: threading.Event = threading.Event()
         self._transcribe_lock: threading.Lock = threading.Lock()
         self._workers_lock: threading.Lock = threading.Lock()
@@ -91,11 +112,16 @@ class VoiceMouseApp:
         self._prewarm_started: bool = False
 
     def run(self) -> None:
-        self._listener.start()
-        self._keyboard_listener.start()
-        if self._recording_submit_listener is not None:
-            self._recording_submit_listener.start()
-        self._set_recording_status(False)
+        if self._listener_mode == "child":
+            self._start_listener_child()
+        elif self._listener_mode == "inline":
+            assert self._listener is not None and self._keyboard_listener is not None
+            self._listener.start()
+            self._keyboard_listener.start()
+            if self._recording_submit_listener is not None:
+                self._recording_submit_listener.start()
+        # listener=off: no listeners
+        self._set_recording_status(False, listener_mode=self._listener_mode)
         recording_submit_hotkey = self._config.recording_submit_keycode
         _LOG.info(
             "VibeMouse ready. "
@@ -111,7 +137,8 @@ class VoiceMouseApp:
             + f"gesture_freeze_pointer={self._config.gesture_freeze_pointer}, "
             + f"gesture_restore_cursor={self._config.gesture_restore_cursor}, "
             + f"prewarm_on_start={self._config.prewarm_on_start}, "
-            + f"prewarm_delay_s={self._config.prewarm_delay_s}. "
+            + f"prewarm_delay_s={self._config.prewarm_delay_s}, "
+            + f"listener_mode={self._listener_mode}. "
             + "Press side-front to start/stop recording. While recording, side-rear sends transcript to OpenClaw; otherwise side-rear sends Enter."
         )
         self._maybe_prewarm_transcriber()
@@ -123,8 +150,20 @@ class VoiceMouseApp:
             self.shutdown()
 
     def shutdown(self) -> None:
-        self._listener.stop()
-        self._keyboard_listener.stop()
+        if self._ipc_server is not None:
+            self._ipc_server.send_command("shutdown")
+            self._ipc_server.stop()
+            self._ipc_server = None
+        if self._listener_process is not None:
+            try:
+                self._listener_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._listener_process.kill()
+            self._listener_process = None
+        if self._listener is not None:
+            self._listener.stop()
+        if self._keyboard_listener is not None:
+            self._keyboard_listener.stop()
         if self._recording_submit_listener is not None:
             self._recording_submit_listener.stop()
         self._recorder.cancel()
@@ -469,10 +508,52 @@ class VoiceMouseApp:
         except Exception as error:
             _LOG.warning("Transcriber prewarm skipped: %s", error)
 
-    def _set_recording_status(self, is_recording: bool) -> None:
-        payload = {
+    def _start_listener_child(self) -> None:
+        """Spawn listener as subprocess and start IPC server to receive events."""
+        cmd = [
+            sys.executable,
+            "-m",
+            "vibemouse.cli.main",
+            "listener",
+            "run",
+            "--connect",
+            "stdio",
+        ]
+        if self._config_path is not None:
+            cmd.extend(["--config", str(self._config_path)])
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+        self._listener_process = proc
+        if proc.stdin is None or proc.stdout is None:
+            raise RuntimeError("Failed to create listener subprocess pipes")
+        self._ipc_server = IPCServer(
+            reader=proc.stdout,
+            writer=proc.stdin,
+            on_event=self._handle_input_event,
+        )
+        self._ipc_server.start()
+        _LOG.info("Listener child process started (listener_mode=child)")
+
+    def _set_recording_status(
+        self,
+        is_recording: bool,
+        *,
+        listener_mode: ListenerMode | None = None,
+    ) -> None:
+        mode = (
+            listener_mode
+            if listener_mode is not None
+            else getattr(self, "_listener_mode", "inline")
+        )
+        payload: dict[str, object] = {
             "recording": is_recording,
             "state": "recording" if is_recording else "idle",
+            "listener_mode": mode,
         }
         try:
             write_status(self._config.status_file, payload)

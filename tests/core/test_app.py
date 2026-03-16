@@ -80,7 +80,10 @@ class VoiceMouseAppWorkspaceTests(unittest.TestCase):
                 dict[str, object],
                 json.loads(status_file.read_text(encoding="utf-8")),
             )
-            self.assertEqual(payload, {"recording": True, "state": "recording"})
+            self.assertEqual(
+                payload,
+                {"recording": True, "state": "recording", "listener_mode": "inline"},
+            )
 
     def test_set_recording_status_writes_idle_payload(self) -> None:
         subject = self._make_subject()
@@ -98,7 +101,10 @@ class VoiceMouseAppWorkspaceTests(unittest.TestCase):
                 dict[str, object],
                 json.loads(status_file.read_text(encoding="utf-8")),
             )
-            self.assertEqual(payload, {"recording": False, "state": "idle"})
+            self.assertEqual(
+                payload,
+                {"recording": False, "state": "idle", "listener_mode": "inline"},
+            )
 
 
 class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
