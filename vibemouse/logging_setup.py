@@ -1,19 +1,4 @@
-from __future__ import annotations
+from importlib import import_module as _import_module
+import sys as _sys
 
-import logging
-
-_LOG_FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
-
-
-def configure_logging(level_name: str) -> None:
-    normalized = level_name.strip().upper()
-    level = getattr(logging, normalized, logging.INFO)
-    root = logging.getLogger()
-    if not root.handlers:
-        logging.basicConfig(level=level, format=_LOG_FORMAT)
-        return
-    root.setLevel(level)
-
-
-def get_logger(name: str) -> logging.Logger:
-    return logging.getLogger(name)
+_sys.modules[__name__] = _import_module("vibemouse.core.logging_setup")

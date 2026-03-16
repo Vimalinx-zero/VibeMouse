@@ -504,7 +504,7 @@ class VoiceMouseAppLoggingTests(unittest.TestCase):
             getattr(subject, "_transcribe_and_output"),
         )
 
-        with self.assertLogs("vibemouse.app", level="ERROR") as captured:
+        with self.assertLogs("vibemouse.core.app", level="ERROR") as captured:
             transcribe_and_output(recording, "default")
 
         self.assertTrue(
