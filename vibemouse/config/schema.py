@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from vibemouse.core.commands import KNOWN_COMMAND_NAMES, is_valid_event_name
+
 
 LATEST_CONFIG_SCHEMA_VERSION = 1
 
@@ -28,6 +30,7 @@ _LISTENER_MODE_CHOICES = {"inline", "child", "off"}
 
 @dataclass(frozen=True)
 class AppConfig:
+    bindings: dict[str, str]
     sample_rate: int
     channels: int
     dtype: str
@@ -155,6 +158,7 @@ def build_default_config_document() -> dict[str, object]:
 
 def config_document_to_app_config(document: Mapping[str, object]) -> AppConfig:
     normalized = normalize_config_document(document)
+    bindings = _expect_mapping(normalized, "bindings")
     transcriber = _expect_mapping(normalized, "transcriber")
     input_section = _expect_mapping(normalized, "input")
     output = _expect_mapping(normalized, "output")
@@ -164,6 +168,7 @@ def config_document_to_app_config(document: Mapping[str, object]) -> AppConfig:
     runtime = _expect_mapping(normalized, "runtime")
 
     return AppConfig(
+        bindings={str(key): str(value) for key, value in bindings.items()},
         sample_rate=int(transcriber["sample_rate"]),
         channels=int(transcriber["channels"]),
         dtype=str(transcriber["dtype"]),
@@ -346,8 +351,21 @@ def _normalize_bindings(raw: object) -> dict[str, str]:
     section = _expect_mapping_value(raw, "bindings")
     normalized: dict[str, str] = {}
     for key, value in section.items():
-        event_name = _coerce_string(key, "bindings key")
-        command_name = _coerce_string(value, f"bindings[{event_name!r}]")
+        event_name = _coerce_non_empty_string(key, "bindings key").lower()
+        if not is_valid_event_name(event_name):
+            raise ValueError(
+                "bindings key must use normalized event segments separated by dots; "
+                + f"got {event_name!r}"
+            )
+        command_name = _coerce_non_empty_string(
+            value,
+            f"bindings[{event_name!r}]",
+        ).lower()
+        if command_name not in KNOWN_COMMAND_NAMES:
+            options = ", ".join(sorted(KNOWN_COMMAND_NAMES))
+            raise ValueError(
+                f"bindings[{event_name!r}] must be one of: {options}; got {command_name!r}"
+            )
         normalized[event_name] = command_name
     return normalized
 

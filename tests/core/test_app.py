@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
 
+from vibemouse.core.commands import COMMAND_SEND_ENTER, EVENT_MOUSE_SIDE_FRONT_PRESS
 from vibemouse.app import VoiceMouseApp
 
 
@@ -275,6 +276,33 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
         on_submit()
 
         self.assertEqual(rear_calls, [])
+
+    def test_handle_input_event_routes_through_binding_resolver(self) -> None:
+        subject = self._make_subject()
+        send_enter_calls: list[str] = []
+        setattr(
+            subject,
+            "_binding_resolver",
+            SimpleNamespace(
+                resolve=lambda event_name: COMMAND_SEND_ENTER
+                if event_name == EVENT_MOUSE_SIDE_FRONT_PRESS
+                else None
+            ),
+        )
+        setattr(
+            subject,
+            "_output",
+            SimpleNamespace(send_enter=lambda mode: send_enter_calls.append(mode)),
+        )
+        setattr(subject, "_config", SimpleNamespace(enter_mode="enter"))
+
+        handle_event = cast(
+            Callable[[str], None],
+            getattr(subject, "_handle_input_event"),
+        )
+        handle_event(EVENT_MOUSE_SIDE_FRONT_PRESS)
+
+        self.assertEqual(send_enter_calls, ["enter"])
 
     def test_transcribe_and_output_openclaw_uses_openclaw_sender(self) -> None:
         subject = self._make_subject()

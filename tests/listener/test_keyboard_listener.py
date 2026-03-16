@@ -4,6 +4,7 @@ import unittest
 from collections.abc import Callable
 from typing import cast
 
+from vibemouse.core.commands import EVENT_HOTKEY_RECORD_TOGGLE
 from vibemouse.keyboard_listener import KeyboardHotkeyListener
 
 
@@ -15,6 +16,13 @@ class KeyboardHotkeyListenerTests(unittest.TestCase):
     def test_constructor_rejects_empty_combo(self) -> None:
         with self.assertRaisesRegex(ValueError, "keycodes must not be empty"):
             _ = KeyboardHotkeyListener(on_hotkey=_noop, keycodes=())
+
+    def test_constructor_requires_callback_or_event(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "on_hotkey or on_event/event_name must be configured",
+        ):
+            _ = KeyboardHotkeyListener(keycodes=(42, 125, 193))
 
     def test_combo_fires_once_until_released(self) -> None:
         listener = KeyboardHotkeyListener(
@@ -60,3 +68,17 @@ class KeyboardHotkeyListenerTests(unittest.TestCase):
         self.assertFalse(process(42, 1))
         self.assertFalse(process(125, 1))
         self.assertTrue(process(193, 1))
+
+    def test_dispatch_hotkey_emits_configured_event(self) -> None:
+        seen: list[str] = []
+        listener = KeyboardHotkeyListener(
+            on_event=seen.append,
+            event_name=EVENT_HOTKEY_RECORD_TOGGLE,
+            keycodes=(42, 125, 193),
+            debounce_s=0.0,
+        )
+
+        dispatch = cast(Callable[[], None], getattr(listener, "_dispatch_hotkey"))
+        dispatch()
+
+        self.assertEqual(seen, [EVENT_HOTKEY_RECORD_TOGGLE])

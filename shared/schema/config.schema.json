@@ -16,8 +16,23 @@
     "bindings": {
       "type": "object",
       "default": {},
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+      },
       "additionalProperties": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "noop",
+          "reload_config",
+          "send_enter",
+          "shutdown",
+          "submit_recording",
+          "toggle_recording",
+          "trigger_secondary_action",
+          "workspace_left",
+          "workspace_right"
+        ]
       }
     },
     "transcriber": {

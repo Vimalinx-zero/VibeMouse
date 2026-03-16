@@ -30,6 +30,9 @@ class ConfigStoreTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": 1,
+                        "bindings": {
+                            "mouse.side_front.press": "send_enter",
+                        },
                         "transcriber": {
                             "backend": "funasr",
                             "model_name": "custom/model",
@@ -64,6 +67,10 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertTrue(config.trust_remote_code)
         self.assertEqual(config.gesture_trigger_button, "right")
         self.assertEqual(config.record_hotkey_keycodes, (30, 31, 32))
+        self.assertEqual(
+            config.bindings,
+            {"mouse.side_front.press": "send_enter"},
+        )
         self.assertTrue(config.auto_paste)
         self.assertEqual(config.enter_mode, "ctrl_enter")
         self.assertEqual(config.log_level, "ERROR")
@@ -121,6 +128,9 @@ class ConfigStoreTests(unittest.TestCase):
             store.save_document(
                 {
                     "schema_version": 1,
+                    "bindings": {
+                        "mouse.side_front.press": "send_enter",
+                    },
                     "input": {
                         "front_button": "x2",
                         "rear_button": "x1",
@@ -132,11 +142,36 @@ class ConfigStoreTests(unittest.TestCase):
             payload = json.loads(config_path.read_text(encoding="utf-8"))
 
         self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(
+            payload["bindings"],
+            {"mouse.side_front.press": "send_enter"},
+        )
         self.assertEqual(payload["input"]["front_button"], "x2")
         self.assertEqual(payload["input"]["rear_button"], "x1")
         self.assertEqual(payload["input"]["record_hotkey_keycodes"], [10, 20, 30])
         self.assertIn("transcriber", payload)
         self.assertIn("runtime", payload)
+
+    def test_invalid_binding_command_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="vibemouse-config-") as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "bindings": {
+                            "mouse.side_front.press": "paste_now",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "bindings\\['mouse\\.side_front\\.press'\\] must be one of",
+            ):
+                _ = load_config(config_path, env={})
 
 
 class StatusStoreTests(unittest.TestCase):

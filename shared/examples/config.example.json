@@ -1,5 +1,10 @@
 {
   "schema_version": 1,
+  "bindings": {
+    "mouse.side_front.press": "toggle_recording",
+    "mouse.side_rear.press": "trigger_secondary_action",
+    "hotkey.record_toggle": "toggle_recording"
+  },
   "transcriber": {
     "backend": "funasr_onnx",
     "model_name": "iic/SenseVoiceSmall",
