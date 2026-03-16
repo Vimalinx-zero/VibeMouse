@@ -12,7 +12,9 @@ from vibemouse.bindings.resolver import BindingResolver
 from vibemouse.core.audio import AudioRecorder, AudioRecording
 from vibemouse.core.commands import (
     COMMAND_NOOP,
+    COMMAND_RELOAD_CONFIG,
     COMMAND_SEND_ENTER,
+    COMMAND_SHUTDOWN,
     COMMAND_SUBMIT_RECORDING,
     COMMAND_TOGGLE_RECORDING,
     COMMAND_TRIGGER_SECONDARY_ACTION,
@@ -22,10 +24,10 @@ from vibemouse.core.commands import (
     EVENT_HOTKEY_RECORD_TOGGLE,
     gesture_direction_to_event,
 )
-from vibemouse.config import AppConfig, write_status
+from vibemouse.config import AppConfig, load_config, write_status
 from vibemouse.core.output import TextOutput
 from vibemouse.core.transcriber import SenseVoiceTranscriber
-from vibemouse.ipc.server import IPCServer
+from vibemouse.ipc.server import AgentCommandServer, IPCServer
 from vibemouse.listener.keyboard_listener import KeyboardHotkeyListener
 from vibemouse.listener.mouse_listener import SideButtonListener
 from vibemouse.platform.system_integration import (
@@ -54,73 +56,24 @@ class VoiceMouseApp:
         self._listener_mode: ListenerMode = listener_mode
         self._config_path: Path | None = Path(config_path) if config_path else None
         self._system_integration: SystemIntegration = create_system_integration()
-        self._recorder: AudioRecorder = AudioRecorder(
-            sample_rate=config.sample_rate,
-            channels=config.channels,
-            dtype=config.dtype,
-            temp_dir=config.temp_dir,
-        )
-        self._transcriber: SenseVoiceTranscriber = SenseVoiceTranscriber(config)
-        self._output: TextOutput = TextOutput(
-            system_integration=self._system_integration,
-            openclaw_command=config.openclaw_command,
-            openclaw_agent=config.openclaw_agent,
-            openclaw_timeout_s=config.openclaw_timeout_s,
-            openclaw_retries=config.openclaw_retries,
-        )
-        self._binding_resolver: BindingResolver = BindingResolver.from_config(config)
         self._listener: SideButtonListener | None = None
         self._keyboard_listener: KeyboardHotkeyListener | None = None
         self._recording_submit_listener: KeyboardHotkeyListener | None = None
         self._ipc_server: IPCServer | None = None
         self._listener_process: subprocess.Popen | None = None
-
-        if listener_mode == "inline":
-            self._listener = SideButtonListener(
-                on_event=self._handle_input_event,
-                front_button=config.front_button,
-                rear_button=config.rear_button,
-                debounce_s=config.button_debounce_ms / 1000.0,
-                gestures_enabled=config.gestures_enabled,
-                gesture_trigger_button=config.gesture_trigger_button,
-                gesture_threshold_px=config.gesture_threshold_px,
-                gesture_freeze_pointer=config.gesture_freeze_pointer,
-                gesture_restore_cursor=config.gesture_restore_cursor,
-                system_integration=self._system_integration,
-            )
-            self._keyboard_listener = KeyboardHotkeyListener(
-                on_event=self._handle_input_event,
-                event_name=EVENT_HOTKEY_RECORD_TOGGLE,
-                keycodes=config.record_hotkey_keycodes,
-                debounce_s=config.button_debounce_ms / 1000.0,
-            )
-            if config.recording_submit_keycode is not None:
-                self._recording_submit_listener = KeyboardHotkeyListener(
-                    on_event=self._handle_input_event,
-                    event_name=EVENT_HOTKEY_RECORDING_SUBMIT,
-                    keycodes=(config.recording_submit_keycode,),
-                    debounce_s=config.button_debounce_ms / 1000.0,
-                )
-        elif listener_mode == "child":
-            pass  # IPC server and subprocess started in run()
-        # listener_mode == "off": no listeners
+        self._command_server: AgentCommandServer | None = None
 
         self._stop_event: threading.Event = threading.Event()
         self._transcribe_lock: threading.Lock = threading.Lock()
         self._workers_lock: threading.Lock = threading.Lock()
         self._workers: set[threading.Thread] = set()
         self._prewarm_started: bool = False
+        self._command_lock: threading.RLock = threading.RLock()
+        self._configure_runtime(config)
 
     def run(self) -> None:
-        if self._listener_mode == "child":
-            self._start_listener_child()
-        elif self._listener_mode == "inline":
-            assert self._listener is not None and self._keyboard_listener is not None
-            self._listener.start()
-            self._keyboard_listener.start()
-            if self._recording_submit_listener is not None:
-                self._recording_submit_listener.start()
-        # listener=off: no listeners
+        self._start_command_server()
+        self._start_listener_mode()
         self._set_recording_status(False, listener_mode=self._listener_mode)
         recording_submit_hotkey = self._config.recording_submit_keycode
         _LOG.info(
@@ -150,22 +103,10 @@ class VoiceMouseApp:
             self.shutdown()
 
     def shutdown(self) -> None:
-        if self._ipc_server is not None:
-            self._ipc_server.send_command("shutdown")
-            self._ipc_server.stop()
-            self._ipc_server = None
-        if self._listener_process is not None:
-            try:
-                self._listener_process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self._listener_process.kill()
-            self._listener_process = None
-        if self._listener is not None:
-            self._listener.stop()
-        if self._keyboard_listener is not None:
-            self._keyboard_listener.stop()
-        if self._recording_submit_listener is not None:
-            self._recording_submit_listener.stop()
+        self._stop_listener_mode()
+        if self._command_server is not None:
+            self._command_server.stop()
+            self._command_server = None
         self._recorder.cancel()
         self._set_recording_status(False)
         with self._workers_lock:
@@ -221,6 +162,19 @@ class VoiceMouseApp:
         *,
         source_event: str | None = None,
     ) -> None:
+        command_lock = getattr(self, "_command_lock", None)
+        if command_lock is None:
+            self._execute_command_unlocked(command_name, source_event=source_event)
+            return
+        with command_lock:
+            self._execute_command_unlocked(command_name, source_event=source_event)
+
+    def _execute_command_unlocked(
+        self,
+        command_name: str,
+        *,
+        source_event: str | None = None,
+    ) -> None:
         if source_event is not None:
             _LOG.debug("Resolved input event '%s' -> '%s'", source_event, command_name)
 
@@ -245,6 +199,12 @@ class VoiceMouseApp:
             return
         if command_name == COMMAND_WORKSPACE_RIGHT:
             self._dispatch_workspace_command("right")
+            return
+        if command_name == COMMAND_RELOAD_CONFIG:
+            self._reload_config()
+            return
+        if command_name == COMMAND_SHUTDOWN:
+            self._request_shutdown()
             return
 
         _LOG.warning("Ignoring unsupported command '%s'", command_name)
@@ -539,6 +499,119 @@ class VoiceMouseApp:
         self._ipc_server.start()
         _LOG.info("Listener child process started (listener_mode=child)")
 
+    def _configure_runtime(self, config: AppConfig) -> None:
+        self._config = config
+        self._binding_resolver = BindingResolver.from_config(config)
+        self._recorder = AudioRecorder(
+            sample_rate=config.sample_rate,
+            channels=config.channels,
+            dtype=config.dtype,
+            temp_dir=config.temp_dir,
+        )
+        self._transcriber = SenseVoiceTranscriber(config)
+        self._output = TextOutput(
+            system_integration=self._system_integration,
+            openclaw_command=config.openclaw_command,
+            openclaw_agent=config.openclaw_agent,
+            openclaw_timeout_s=config.openclaw_timeout_s,
+            openclaw_retries=config.openclaw_retries,
+        )
+        self._listener = None
+        self._keyboard_listener = None
+        self._recording_submit_listener = None
+        if self._listener_mode == "inline":
+            self._listener = SideButtonListener(
+                on_event=self._handle_input_event,
+                front_button=config.front_button,
+                rear_button=config.rear_button,
+                debounce_s=config.button_debounce_ms / 1000.0,
+                gestures_enabled=config.gestures_enabled,
+                gesture_trigger_button=config.gesture_trigger_button,
+                gesture_threshold_px=config.gesture_threshold_px,
+                gesture_freeze_pointer=config.gesture_freeze_pointer,
+                gesture_restore_cursor=config.gesture_restore_cursor,
+                system_integration=self._system_integration,
+            )
+            self._keyboard_listener = KeyboardHotkeyListener(
+                on_event=self._handle_input_event,
+                event_name=EVENT_HOTKEY_RECORD_TOGGLE,
+                keycodes=config.record_hotkey_keycodes,
+                debounce_s=config.button_debounce_ms / 1000.0,
+            )
+            if config.recording_submit_keycode is not None:
+                self._recording_submit_listener = KeyboardHotkeyListener(
+                    on_event=self._handle_input_event,
+                    event_name=EVENT_HOTKEY_RECORDING_SUBMIT,
+                    keycodes=(config.recording_submit_keycode,),
+                    debounce_s=config.button_debounce_ms / 1000.0,
+                )
+
+    def _start_command_server(self) -> None:
+        if self._command_server is not None:
+            return
+        self._command_server = AgentCommandServer(on_command=self._execute_command)
+        self._command_server.start()
+        _LOG.info("Agent command server listening on 127.0.0.1:%s", self._command_server.port)
+
+    def _start_listener_mode(self) -> None:
+        if self._listener_mode == "child":
+            self._start_listener_child()
+            return
+        if self._listener_mode == "inline":
+            assert self._listener is not None and self._keyboard_listener is not None
+            self._listener.start()
+            self._keyboard_listener.start()
+            if self._recording_submit_listener is not None:
+                self._recording_submit_listener.start()
+
+    def _stop_listener_mode(self) -> None:
+        if self._ipc_server is not None:
+            self._ipc_server.send_command(COMMAND_SHUTDOWN)
+            self._ipc_server.stop()
+            self._ipc_server = None
+        if self._listener_process is not None:
+            try:
+                self._listener_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._listener_process.kill()
+            self._listener_process = None
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
+        if self._keyboard_listener is not None:
+            self._keyboard_listener.stop()
+            self._keyboard_listener = None
+        if self._recording_submit_listener is not None:
+            self._recording_submit_listener.stop()
+            self._recording_submit_listener = None
+
+    def _reload_config(self) -> None:
+        if self._recorder.is_recording:
+            _LOG.warning("Ignoring reload_config while recording is active")
+            return
+        with self._workers_lock:
+            if self._workers:
+                _LOG.warning("Ignoring reload_config while transcription workers are still running")
+                return
+        config_path = self._config_path
+        if config_path is None:
+            _LOG.warning("Ignoring reload_config because no config path is available")
+            return
+        try:
+            config = load_config(config_path)
+        except Exception as error:
+            _LOG.exception("Failed to reload config from %s: %s", config_path, error)
+            return
+        self._stop_listener_mode()
+        self._configure_runtime(config)
+        self._start_listener_mode()
+        self._set_recording_status(False, listener_mode=self._listener_mode)
+        _LOG.info("Config reloaded from %s", config_path)
+
+    def _request_shutdown(self) -> None:
+        _LOG.info("Shutdown command received")
+        self._stop_event.set()
+
     def _set_recording_status(
         self,
         is_recording: bool,
@@ -555,6 +628,9 @@ class VoiceMouseApp:
             "state": "recording" if is_recording else "idle",
             "listener_mode": mode,
         }
+        command_server = getattr(self, "_command_server", None)
+        if command_server is not None and getattr(command_server, "port", 0):
+            payload["ipc_port"] = int(command_server.port)
         try:
             write_status(self._config.status_file, payload)
         except Exception:

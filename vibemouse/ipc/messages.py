@@ -68,6 +68,16 @@ def write_lpjson_frame(stream: Any, payload: dict[str, Any]) -> None:
     stream.flush()
 
 
+def binary_reader(stream: Any) -> Any:
+    """Return a binary-capable reader for text or binary streams."""
+    return getattr(stream, "buffer", stream)
+
+
+def binary_writer(stream: Any) -> Any:
+    """Return a binary-capable writer for text or binary streams."""
+    return getattr(stream, "buffer", stream)
+
+
 # --- Message types ---
 
 EventMessage = dict[str, Any]  # {"type":"event","event":"mouse.side_front.press"}

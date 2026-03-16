@@ -5,17 +5,26 @@ from vibemouse.ipc.messages import (
     CommandMessage,
     EventMessage,
     Message,
+    binary_reader,
+    binary_writer,
     parse_message,
+    read_lpjson_frame,
     serialize_message,
+    write_lpjson_frame,
 )
-from vibemouse.ipc.server import IPCServer
+from vibemouse.ipc.server import AgentCommandServer, IPCServer
 
 __all__ = [
+    "AgentCommandServer",
+    "binary_reader",
+    "binary_writer",
     "CommandMessage",
     "EventMessage",
     "IPCClient",
     "IPCServer",
     "Message",
     "parse_message",
+    "read_lpjson_frame",
     "serialize_message",
+    "write_lpjson_frame",
 ]

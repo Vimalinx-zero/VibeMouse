@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     app = VoiceMouseApp(
         config,
         listener_mode=listener_mode,
-        config_path=resolved_path if listener_mode == "child" else None,
+        config_path=resolved_path,
     )
     app.run()
     return 0

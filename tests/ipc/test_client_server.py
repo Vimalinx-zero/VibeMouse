@@ -4,32 +4,21 @@ from __future__ import annotations
 
 import io
 import json
+import socket
 import struct
+import threading
 import time
 
 from vibemouse.ipc.client import IPCClient
-from vibemouse.ipc.server import IPCServer
+from vibemouse.ipc.messages import make_command_message, write_lpjson_frame
+from vibemouse.ipc.server import AgentCommandServer, IPCServer
 
 
 def test_ipc_client_send_event() -> None:
     """IPCClient.send_event writes valid LPJSON to stdout (simulating pipe)."""
     stdout_buf = io.BytesIO()
-    class PipeLike:
-        def __init__(self, buf: io.BytesIO) -> None:
-            self._buf = buf
-        def write(self, data: bytes) -> int:
-            return self._buf.write(data)
-        def flush(self) -> None:
-            pass
-        @property
-        def buffer(self) -> io.BytesIO:
-            return self._buf
-    # Actually IPCClient uses self._stdout.buffer.write - so we need stdout to have .buffer
-    # For a real pipe, sys.stdout has .buffer. For test we use a wrapper.
-    stdout_wrapper = PipeLike(stdout_buf)
     stdin_buf = io.BytesIO()
-    stdin_wrapper = type("Stdin", (), {"buffer": stdin_buf})()
-    client = IPCClient(stdin=stdin_wrapper, stdout=stdout_wrapper)
+    client = IPCClient(stdin=stdin_buf, stdout=stdout_buf)
     client.send_event("hotkey.record_toggle")
     data = stdout_buf.getvalue()
     assert len(data) >= 4
@@ -74,3 +63,37 @@ def test_ipc_server_send_command() -> None:
     assert length == len(data) - 4
     payload = json.loads(data[4:].decode("utf-8"))
     assert payload == {"type": "command", "command": "shutdown"}
+
+
+def test_ipc_server_receives_command_when_handler_is_configured() -> None:
+    payload = {"type": "command", "command": "reload_config"}
+    body = json.dumps(payload).encode("utf-8")
+    frame = struct.pack("<I", len(body)) + body
+    reader = io.BytesIO(frame)
+    received: list[str] = []
+    server = IPCServer(reader=reader, on_command=lambda cmd: received.append(cmd))
+    server.start()
+    time.sleep(0.1)
+    server.stop()
+    assert received == ["reload_config"]
+
+
+def test_agent_command_server_accepts_loopback_command() -> None:
+    received: list[str] = []
+    ready = threading.Event()
+
+    def on_command(command_name: str) -> None:
+        received.append(command_name)
+        ready.set()
+
+    server = AgentCommandServer(on_command=on_command)
+    server.start()
+    try:
+        with socket.create_connection(("127.0.0.1", server.port), timeout=2) as conn:
+            stream = conn.makefile("rwb")
+            write_lpjson_frame(stream, make_command_message("shutdown"))
+            stream.close()
+        assert ready.wait(timeout=2)
+        assert received == ["shutdown"]
+    finally:
+        server.stop()
