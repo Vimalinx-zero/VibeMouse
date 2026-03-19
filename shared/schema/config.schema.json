@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibemouse.local/schema/config.schema.json",
+  "title": "VibeMouse Config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "default": 1
+    },
+    "bindings": {
+      "type": "object",
+      "default": {},
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "transcriber": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sample_rate": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 16000
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "dtype": {
+          "type": "string",
+          "minLength": 1,
+          "default": "float32"
+        },
+        "backend": {
+          "type": "string",
+          "minLength": 1,
+          "default": "funasr_onnx"
+        },
+        "model_name": {
+          "type": "string",
+          "minLength": 1,
+          "default": "iic/SenseVoiceSmall"
+        },
+        "device": {
+          "type": "string",
+          "minLength": 1,
+          "default": "cpu"
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1,
+          "default": "auto"
+        },
+        "use_itn": {
+          "type": "boolean",
+          "default": true
+        },
+        "enable_vad": {
+          "type": "boolean",
+          "default": true
+        },
+        "vad_max_single_segment_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30000
+        },
+        "merge_vad": {
+          "type": "boolean",
+          "default": true
+        },
+        "merge_length_s": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 15
+        },
+        "fallback_to_cpu": {
+          "type": "boolean",
+          "default": true
+        },
+        "trust_remote_code": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "front_button": {
+          "type": "string",
+          "enum": ["x1", "x2"],
+          "default": "x1"
+        },
+        "rear_button": {
+          "type": "string",
+          "enum": ["x1", "x2"],
+          "default": "x2"
+        },
+        "record_hotkey_keycodes": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "default": [42, 125, 193]
+        },
+        "recording_submit_keycode": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "default": null
+        },
+        "button_debounce_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 150
+        },
+        "gestures_enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "gesture_trigger_button": {
+          "type": "string",
+          "enum": ["front", "rear", "right"],
+          "default": "rear"
+        },
+        "gesture_threshold_px": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 120
+        },
+        "gesture_freeze_pointer": {
+          "type": "boolean",
+          "default": true
+        },
+        "gesture_restore_cursor": {
+          "type": "boolean",
+          "default": true
+        },
+        "gesture_up_action": {
+          "type": "string",
+          "enum": ["record_toggle", "send_enter", "workspace_left", "workspace_right", "noop"],
+          "default": "record_toggle"
+        },
+        "gesture_down_action": {
+          "type": "string",
+          "enum": ["record_toggle", "send_enter", "workspace_left", "workspace_right", "noop"],
+          "default": "noop"
+        },
+        "gesture_left_action": {
+          "type": "string",
+          "enum": ["record_toggle", "send_enter", "workspace_left", "workspace_right", "noop"],
+          "default": "noop"
+        },
+        "gesture_right_action": {
+          "type": "string",
+          "enum": ["record_toggle", "send_enter", "workspace_left", "workspace_right", "noop"],
+          "default": "send_enter"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enter_mode": {
+          "type": "string",
+          "enum": ["enter", "ctrl_enter", "shift_enter", "none"],
+          "default": "enter"
+        },
+        "auto_paste": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "openclaw": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "default": "openclaw"
+        },
+        "agent": {
+          "type": ["string", "null"],
+          "default": "main"
+        },
+        "timeout_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 20.0
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        }
+      }
+    },
+    "startup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prewarm_on_start": {
+          "type": "boolean",
+          "default": true
+        },
+        "prewarm_delay_s": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0.0
+        }
+      }
+    },
+    "logs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["debug", "info", "warning", "error", "critical"],
+          "default": "info"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status_file": {
+          "type": "string"
+        },
+        "temp_dir": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

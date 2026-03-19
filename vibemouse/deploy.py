@@ -186,7 +186,9 @@ def render_env_file(env_map: dict[str, str]) -> str:
 
 
 def render_service_file(*, env_file: Path, log_file: Path, exec_start: str) -> str:
-    log_dir = log_file.parent
+    env_file_str = env_file.as_posix()
+    log_file_str = log_file.as_posix()
+    log_dir = log_file.parent.as_posix()
     lines = [
         "[Unit]",
         "Description=VibeMouse voice input service",
@@ -195,11 +197,11 @@ def render_service_file(*, env_file: Path, log_file: Path, exec_start: str) -> s
         "",
         "[Service]",
         "Type=simple",
-        f"EnvironmentFile={env_file}",
+        f"EnvironmentFile={env_file_str}",
         f"ExecStartPre=/usr/bin/mkdir -p {log_dir}",
         f"ExecStart={exec_start}",
-        f"StandardOutput=append:{log_file}",
-        f"StandardError=append:{log_file}",
+        f"StandardOutput=append:{log_file_str}",
+        f"StandardError=append:{log_file_str}",
         "Restart=on-failure",
         "RestartSec=2",
         "",

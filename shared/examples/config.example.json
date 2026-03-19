@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "transcriber": {
+    "backend": "funasr_onnx",
+    "model_name": "iic/SenseVoiceSmall",
+    "language": "auto"
+  },
+  "input": {
+    "front_button": "x1",
+    "rear_button": "x2",
+    "record_hotkey_keycodes": [42, 125, 193],
+    "gesture_trigger_button": "rear"
+  },
+  "output": {
+    "enter_mode": "enter",
+    "auto_paste": false
+  },
+  "openclaw": {
+    "command": "openclaw",
+    "agent": "main"
+  },
+  "startup": {
+    "prewarm_on_start": true
+  },
+  "logs": {
+    "level": "info"
+  }
+}
