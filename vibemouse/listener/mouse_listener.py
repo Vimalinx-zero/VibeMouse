@@ -9,6 +9,11 @@ import time
 from collections.abc import Callable
 from typing import Protocol, cast
 
+from vibemouse.core.commands import (
+    EVENT_MOUSE_SIDE_FRONT_PRESS,
+    EVENT_MOUSE_SIDE_REAR_PRESS,
+    gesture_direction_to_event,
+)
 from vibemouse.platform.system_integration import (
     SystemIntegration,
     create_system_integration,
@@ -18,18 +23,21 @@ from vibemouse.platform.system_integration import (
 
 ButtonCallback = Callable[[], None]
 GestureCallback = Callable[[str], None]
+EventCallback = Callable[[str], None]
 _LOG = logging.getLogger(__name__)
 
 
 class SideButtonListener:
     def __init__(
         self,
-        on_front_press: ButtonCallback,
-        on_rear_press: ButtonCallback,
+        *,
         front_button: str,
         rear_button: str,
+        on_front_press: ButtonCallback | None = None,
+        on_rear_press: ButtonCallback | None = None,
         debounce_s: float = 0.15,
         on_gesture: GestureCallback | None = None,
+        on_event: EventCallback | None = None,
         gestures_enabled: bool = False,
         gesture_trigger_button: str = "rear",
         gesture_threshold_px: int = 120,
@@ -42,9 +50,14 @@ class SideButtonListener:
             raise ValueError(
                 "gesture_trigger_button must be one of: front, rear, right"
             )
-        self._on_front_press: ButtonCallback = on_front_press
-        self._on_rear_press: ButtonCallback = on_rear_press
+        if on_event is None and (on_front_press is None or on_rear_press is None):
+            raise ValueError(
+                "on_event or on_front_press/on_rear_press must be configured"
+            )
+        self._on_front_press: ButtonCallback | None = on_front_press
+        self._on_rear_press: ButtonCallback | None = on_rear_press
         self._on_gesture: GestureCallback | None = on_gesture
+        self._on_event: EventCallback | None = on_event
         self._front_button: str = front_button
         self._rear_button: str = rear_button
         self._debounce_s: float = max(0.0, debounce_s)
@@ -622,6 +635,11 @@ class SideButtonListener:
             self._restore_cursor_position(anchor_cursor)
 
     def _dispatch_gesture(self, direction: str) -> None:
+        if self._on_event is not None:
+            event_name = gesture_direction_to_event(direction)
+            if event_name is not None:
+                self._on_event(event_name)
+                return
         callback = self._on_gesture
         if callback is None:
             return
@@ -853,11 +871,21 @@ class SideButtonListener:
 
     def _dispatch_front_press(self) -> None:
         if self._should_fire_front():
-            self._on_front_press()
+            callback = self._on_front_press
+            if self._on_event is not None:
+                self._on_event(EVENT_MOUSE_SIDE_FRONT_PRESS)
+                return
+            if callback is not None:
+                callback()
 
     def _dispatch_rear_press(self) -> None:
         if self._should_fire_rear():
-            self._on_rear_press()
+            callback = self._on_rear_press
+            if self._on_event is not None:
+                self._on_event(EVENT_MOUSE_SIDE_REAR_PRESS)
+                return
+            if callback is not None:
+                callback()
 
     def _should_fire_front(self) -> bool:
         now = time.monotonic()

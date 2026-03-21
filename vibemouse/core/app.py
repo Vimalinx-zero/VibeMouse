@@ -6,7 +6,21 @@ import threading
 from pathlib import Path
 from typing import Literal
 
+from vibemouse.bindings.actions import command_for_legacy_gesture_action
+from vibemouse.bindings.resolver import BindingResolver
 from vibemouse.core.audio import AudioRecorder, AudioRecording
+from vibemouse.core.commands import (
+    COMMAND_NOOP,
+    COMMAND_SEND_ENTER,
+    COMMAND_SUBMIT_RECORDING,
+    COMMAND_TOGGLE_RECORDING,
+    COMMAND_TRIGGER_SECONDARY_ACTION,
+    COMMAND_WORKSPACE_LEFT,
+    COMMAND_WORKSPACE_RIGHT,
+    EVENT_HOTKEY_RECORDING_SUBMIT,
+    EVENT_HOTKEY_RECORD_TOGGLE,
+    gesture_direction_to_event,
+)
 from vibemouse.config import AppConfig, write_status
 from vibemouse.core.output import TextOutput
 from vibemouse.core.transcriber import SenseVoiceTranscriber
@@ -43,10 +57,9 @@ class VoiceMouseApp:
             openclaw_timeout_s=config.openclaw_timeout_s,
             openclaw_retries=config.openclaw_retries,
         )
+        self._binding_resolver: BindingResolver = BindingResolver.from_config(config)
         self._listener: SideButtonListener = SideButtonListener(
-            on_front_press=self._on_front_press,
-            on_rear_press=self._on_rear_press,
-            on_gesture=self._on_gesture,
+            on_event=self._handle_input_event,
             front_button=config.front_button,
             rear_button=config.rear_button,
             debounce_s=config.button_debounce_ms / 1000.0,
@@ -58,14 +71,16 @@ class VoiceMouseApp:
             system_integration=self._system_integration,
         )
         self._keyboard_listener: KeyboardHotkeyListener = KeyboardHotkeyListener(
-            on_hotkey=self._on_front_press,
+            on_event=self._handle_input_event,
+            event_name=EVENT_HOTKEY_RECORD_TOGGLE,
             keycodes=config.record_hotkey_keycodes,
             debounce_s=config.button_debounce_ms / 1000.0,
         )
         self._recording_submit_listener: KeyboardHotkeyListener | None = None
         if config.recording_submit_keycode is not None:
             self._recording_submit_listener = KeyboardHotkeyListener(
-                on_hotkey=self._on_recording_submit_press,
+                on_event=self._handle_input_event,
+                event_name=EVENT_HOTKEY_RECORDING_SUBMIT,
                 keycodes=(config.recording_submit_keycode,),
                 debounce_s=config.button_debounce_ms / 1000.0,
             )
@@ -127,6 +142,75 @@ class VoiceMouseApp:
             )
 
     def _on_front_press(self) -> None:
+        self._execute_command(COMMAND_TOGGLE_RECORDING)
+
+    def _on_rear_press(self) -> None:
+        self._execute_command(COMMAND_TRIGGER_SECONDARY_ACTION)
+
+    def _on_recording_submit_press(self) -> None:
+        self._execute_command(COMMAND_SUBMIT_RECORDING)
+
+    def _on_gesture(self, direction: str) -> None:
+        event_name = gesture_direction_to_event(direction)
+        if event_name is None:
+            _LOG.warning("Gesture '%s' mapped to unknown direction", direction)
+            return
+
+        try:
+            binding_resolver = self._binding_resolver
+        except AttributeError:
+            action = self._resolve_gesture_action(direction)
+            self._execute_command(command_for_legacy_gesture_action(action))
+            return
+
+        command_name = binding_resolver.resolve(event_name)
+        if command_name is None:
+            _LOG.info("Gesture '%s' recognized with no action configured", direction)
+            return
+        self._execute_command(command_name, source_event=event_name)
+
+    def _handle_input_event(self, event_name: str) -> None:
+        command_name = self._binding_resolver.resolve(event_name)
+        if command_name is None:
+            _LOG.debug("Ignoring unbound input event: %s", event_name)
+            return
+        self._execute_command(command_name, source_event=event_name)
+
+    def _execute_command(
+        self,
+        command_name: str,
+        *,
+        source_event: str | None = None,
+    ) -> None:
+        if source_event is not None:
+            _LOG.debug("Resolved input event '%s' -> '%s'", source_event, command_name)
+
+        if command_name == COMMAND_NOOP:
+            if source_event is not None:
+                _LOG.info("Input event '%s' resolved to noop", source_event)
+            return
+        if command_name == COMMAND_TOGGLE_RECORDING:
+            self._toggle_recording()
+            return
+        if command_name == COMMAND_TRIGGER_SECONDARY_ACTION:
+            self._trigger_secondary_action()
+            return
+        if command_name == COMMAND_SUBMIT_RECORDING:
+            self._submit_recording()
+            return
+        if command_name == COMMAND_SEND_ENTER:
+            self._send_enter_command(force_when_disabled=True)
+            return
+        if command_name == COMMAND_WORKSPACE_LEFT:
+            self._dispatch_workspace_command("left")
+            return
+        if command_name == COMMAND_WORKSPACE_RIGHT:
+            self._dispatch_workspace_command("right")
+            return
+
+        _LOG.warning("Ignoring unsupported command '%s'", command_name)
+
+    def _toggle_recording(self) -> None:
         if not self._recorder.is_recording:
             try:
                 self._recorder.start()
@@ -148,77 +232,41 @@ class VoiceMouseApp:
 
         self._start_transcription_worker(recording, output_target="default")
 
-    def _on_rear_press(self) -> None:
+    def _trigger_secondary_action(self) -> None:
         if self._recorder.is_recording:
-            try:
-                recording = self._stop_recording()
-            except Exception as error:
-                _LOG.exception("Failed to stop recording from rear button: %s", error)
-                return
-
-            if recording is None:
-                return
-
-            _LOG.info(
-                "Recording stopped by rear button, sending transcript to OpenClaw"
+            self._stop_recording_for_output(
+                output_target="openclaw",
+                error_prefix="Failed to stop recording from secondary action",
+                success_message=(
+                    "Recording stopped by secondary action, sending transcript to OpenClaw"
+                ),
             )
-            self._start_transcription_worker(recording, output_target="openclaw")
             return
 
+        self._send_enter_command(force_when_disabled=False)
+
+    def _submit_recording(self) -> None:
+        if not self._recorder.is_recording:
+            return
+
+        self._stop_recording_for_output(
+            output_target="openclaw",
+            error_prefix="Failed to stop recording from submit command",
+            success_message="Recording submit command received, sending transcript to OpenClaw",
+        )
+
+    def _send_enter_command(self, *, force_when_disabled: bool) -> None:
         try:
-            self._output.send_enter(mode=self._config.enter_mode)
-            if self._config.enter_mode == "none":
+            mode = self._config.enter_mode
+            if force_when_disabled and mode == "none":
+                mode = "enter"
+            self._output.send_enter(mode=mode)
+            if mode == "none":
                 _LOG.info("Enter key handling disabled (enter_mode=none)")
             else:
                 _LOG.info("Enter key sent")
         except Exception as error:
             _LOG.exception("Failed to send Enter: %s", error)
-
-    def _on_recording_submit_press(self) -> None:
-        if not self._recorder.is_recording:
-            return
-        _LOG.info("Recording submit hotkey pressed, routing to rear-button logic")
-        self._on_rear_press()
-
-    def _on_gesture(self, direction: str) -> None:
-        action = self._resolve_gesture_action(direction)
-        if action == "noop":
-            _LOG.info("Gesture '%s' recognized with no action configured", direction)
-            return
-
-        if action == "record_toggle":
-            _LOG.info("Gesture '%s' -> toggle recording", direction)
-            self._on_front_press()
-            return
-
-        if action == "send_enter":
-            mode = self._config.enter_mode
-            if mode == "none":
-                mode = "enter"
-            try:
-                self._output.send_enter(mode=mode)
-                _LOG.info("Gesture '%s' -> send enter (%s)", direction, mode)
-            except Exception as error:
-                _LOG.exception(
-                    "Gesture '%s' failed to send enter: %s", direction, error
-                )
-            return
-
-        if action == "workspace_left":
-            if self._switch_workspace("left"):
-                _LOG.info("Gesture '%s' -> switch workspace left", direction)
-            else:
-                _LOG.warning("Gesture '%s' failed to switch workspace left", direction)
-            return
-
-        if action == "workspace_right":
-            if self._switch_workspace("right"):
-                _LOG.info("Gesture '%s' -> switch workspace right", direction)
-            else:
-                _LOG.warning("Gesture '%s' failed to switch workspace right", direction)
-            return
-
-        _LOG.warning("Gesture '%s' mapped to unknown action '%s'", direction, action)
 
     def _resolve_gesture_action(self, direction: str) -> str:
         mapping = {
@@ -228,6 +276,12 @@ class VoiceMouseApp:
             "right": self._config.gesture_right_action,
         }
         return mapping.get(direction, "noop")
+
+    def _dispatch_workspace_command(self, direction: str) -> None:
+        if self._switch_workspace(direction):
+            _LOG.info("Workspace switch command succeeded: %s", direction)
+            return
+        _LOG.warning("Workspace switch command failed: %s", direction)
 
     def _switch_workspace(self, direction: str) -> bool:
         try:
@@ -267,6 +321,26 @@ class VoiceMouseApp:
             _LOG.info("Recording was empty and has been discarded")
             return None
         return recording
+
+    def _stop_recording_for_output(
+        self,
+        *,
+        output_target: TranscriptionTarget,
+        error_prefix: str,
+        success_message: str | None = None,
+    ) -> None:
+        try:
+            recording = self._stop_recording()
+        except Exception as error:
+            _LOG.exception("%s: %s", error_prefix, error)
+            return
+
+        if recording is None:
+            return
+
+        if success_message is not None:
+            _LOG.info(success_message)
+        self._start_transcription_worker(recording, output_target=output_target)
 
     def _start_transcription_worker(
         self,

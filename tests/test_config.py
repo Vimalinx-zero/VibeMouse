@@ -37,6 +37,7 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.rear_button, "x2")
         self.assertEqual(config.record_hotkey_keycodes, (42, 125, 193))
         self.assertIsNone(config.recording_submit_keycode)
+        self.assertEqual(config.bindings, {})
 
     def test_record_hotkey_keycodes_can_be_configured(self) -> None:
         with patch.dict(

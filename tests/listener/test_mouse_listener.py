@@ -6,6 +6,7 @@ from importlib import import_module as _real_import_module
 from typing import cast
 from unittest.mock import patch
 
+from vibemouse.core.commands import EVENT_GESTURE_UP, EVENT_MOUSE_SIDE_FRONT_PRESS
 from vibemouse.mouse_listener import SideButtonListener
 
 
@@ -98,6 +99,13 @@ class SideButtonListenerGestureTests(unittest.TestCase):
 
         self.assertIsNotNone(listener)
 
+    def test_constructor_requires_event_or_button_callbacks(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "on_event or on_front_press/on_rear_press must be configured",
+        ):
+            _ = SideButtonListener(front_button="x1", rear_button="x2")
+
     def test_constructor_clamps_rescan_interval_to_minimum(self) -> None:
         listener = SideButtonListener(
             on_front_press=_noop_button,
@@ -130,6 +138,40 @@ class SideButtonListenerGestureTests(unittest.TestCase):
         )
         dispatch_gesture("up")
         self.assertEqual(seen, ["up"])
+
+    def test_dispatch_front_press_emits_normalized_event_when_configured(self) -> None:
+        seen: list[str] = []
+        listener = SideButtonListener(
+            on_event=seen.append,
+            front_button="x1",
+            rear_button="x2",
+            debounce_s=0.0,
+        )
+
+        dispatch_front = cast(
+            Callable[[], None], getattr(listener, "_dispatch_front_press")
+        )
+        dispatch_front()
+
+        self.assertEqual(seen, [EVENT_MOUSE_SIDE_FRONT_PRESS])
+
+    def test_dispatch_gesture_emits_normalized_event_when_on_event_is_used(
+        self,
+    ) -> None:
+        seen: list[str] = []
+        listener = SideButtonListener(
+            on_event=seen.append,
+            front_button="x1",
+            rear_button="x2",
+        )
+
+        dispatch_gesture = cast(
+            Callable[[str], None],
+            getattr(listener, "_dispatch_gesture"),
+        )
+        dispatch_gesture("up")
+
+        self.assertEqual(seen, [EVENT_GESTURE_UP])
 
     def test_finish_gesture_restores_cursor_after_direction_action(self) -> None:
         seen: list[str] = []

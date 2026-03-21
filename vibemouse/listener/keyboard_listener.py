@@ -9,20 +9,29 @@ from typing import Protocol, cast
 
 
 HotkeyCallback = Callable[[], None]
+EventCallback = Callable[[str], None]
 
 
 class KeyboardHotkeyListener:
     def __init__(
         self,
         *,
-        on_hotkey: HotkeyCallback,
         keycodes: tuple[int, ...],
+        on_hotkey: HotkeyCallback | None = None,
+        on_event: EventCallback | None = None,
+        event_name: str | None = None,
         debounce_s: float = 0.15,
         rescan_interval_s: float = 2.0,
     ) -> None:
         if not keycodes:
             raise ValueError("keycodes must not be empty")
-        self._on_hotkey: HotkeyCallback = on_hotkey
+        if on_hotkey is None and (on_event is None or not event_name):
+            raise ValueError(
+                "on_hotkey or on_event/event_name must be configured"
+            )
+        self._on_hotkey: HotkeyCallback | None = on_hotkey
+        self._on_event: EventCallback | None = on_event
+        self._event_name: str | None = event_name
         self._combo: frozenset[int] = frozenset(keycodes)
         self._debounce_s: float = max(0.0, debounce_s)
         self._rescan_interval_s: float = max(0.2, rescan_interval_s)
@@ -118,7 +127,7 @@ class KeyboardHotkeyListener:
                         if event.type != ecodes.EV_KEY:
                             continue
                         if self._process_key_event(event.code, event.value):
-                            self._on_hotkey()
+                            self._dispatch_hotkey()
         finally:
             for dev in devices:
                 dev.close()
@@ -150,6 +159,15 @@ class KeyboardHotkeyListener:
                 self._last_fire_monotonic = now
                 return True
             return False
+
+    def _dispatch_hotkey(self) -> None:
+        event_name = self._event_name
+        if self._on_event is not None and isinstance(event_name, str) and event_name:
+            self._on_event(event_name)
+            return
+        callback = self._on_hotkey
+        if callback is not None:
+            callback()
 
 
 class _EvdevEvent(Protocol):
