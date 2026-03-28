@@ -17,6 +17,7 @@ from vibemouse.core.commands import (
     COMMAND_SHUTDOWN,
     EVENT_MOUSE_SIDE_FRONT_PRESS,
 )
+from vibemouse.core.backends.base import BackendUnavailableError
 from vibemouse.app import VoiceMouseApp
 
 
@@ -373,13 +374,27 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
     def test_transcribe_and_output_openclaw_uses_openclaw_sender(self) -> None:
         subject = self._make_subject()
         recording = SimpleNamespace(duration_s=1.0, path=Path("/tmp/transcribe.wav"))
+        transcribe_calls: list[tuple[Path, str, list[tuple[str, int]]]] = []
         setattr(
             subject,
             "_transcriber",
             SimpleNamespace(
-                transcribe=lambda path: "hello world",
+                transcribe=lambda path, *, output_target, hotwords: transcribe_calls.append(
+                    (path, output_target, hotwords)
+                )
+                or "hello world",
                 device_in_use="cpu",
-                backend_in_use="funasr",
+                backend_in_use="funasr_enhanced",
+            ),
+        )
+        setattr(
+            subject,
+            "_dictionary_service",
+            SimpleNamespace(
+                hotword_phrases=lambda scope: [("codex", 8)]
+                if scope == "openclaw"
+                else [],
+                normalize=lambda text, *, scope: "hello world",
             ),
         )
 
@@ -411,9 +426,131 @@ class VoiceMouseAppButtonBehaviorTests(unittest.TestCase):
         )
         transcribe_and_output(recording, "openclaw")
 
+        self.assertEqual(
+            transcribe_calls,
+            [(Path("/tmp/transcribe.wav"), "openclaw", [("codex", 8)])],
+        )
         self.assertEqual(openclaw_calls, ["hello world"])
         self.assertEqual(inject_calls, [])
         self.assertEqual(removed_paths, [Path("/tmp/transcribe.wav")])
+
+    def test_transcribe_and_output_default_normalizes_text_before_local_output(self) -> None:
+        subject = self._make_subject()
+        recording = SimpleNamespace(duration_s=1.0, path=Path("/tmp/default.wav"))
+        transcribe_calls: list[tuple[Path, str, list[tuple[str, int]]]] = []
+        normalize_calls: list[tuple[str, str]] = []
+        setattr(
+            subject,
+            "_transcriber",
+            SimpleNamespace(
+                transcribe=lambda path, *, output_target, hotwords: transcribe_calls.append(
+                    (path, output_target, hotwords)
+                )
+                or "please ask code x to review",
+                device_in_use="cpu",
+                backend_in_use="sensevoice_fast",
+            ),
+        )
+        setattr(
+            subject,
+            "_dictionary_service",
+            SimpleNamespace(
+                hotword_phrases=lambda scope: [],
+                normalize=lambda text, *, scope: normalize_calls.append((text, scope))
+                or "please ask Codex to review",
+            ),
+        )
+
+        inject_calls: list[tuple[str, bool]] = []
+        setattr(
+            subject,
+            "_output",
+            SimpleNamespace(
+                send_to_openclaw_result=lambda _text: SimpleNamespace(
+                    route="openclaw", reason="dispatched"
+                ),
+                inject_or_clipboard=lambda text, auto_paste: inject_calls.append(
+                    (text, auto_paste)
+                )
+                or "typed",
+            ),
+        )
+        setattr(subject, "_config", SimpleNamespace(auto_paste=True))
+        setattr(subject, "_transcribe_lock", threading.Lock())
+        setattr(subject, "_workers_lock", threading.Lock())
+        setattr(subject, "_workers", set())
+        setattr(subject, "_safe_unlink", lambda _path: None)
+
+        transcribe_and_output = cast(
+            Callable[[object, str], None],
+            getattr(subject, "_transcribe_and_output"),
+        )
+        transcribe_and_output(recording, "default")
+
+        self.assertEqual(
+            transcribe_calls,
+            [(Path("/tmp/default.wav"), "default", [])],
+        )
+        self.assertEqual(
+            normalize_calls,
+            [("please ask code x to review", "default")],
+        )
+        self.assertEqual(inject_calls, [("please ask Codex to review", True)])
+
+    def test_transcribe_and_output_logs_explicit_backend_unavailable_error(self) -> None:
+        subject = self._make_subject()
+        recording = SimpleNamespace(duration_s=1.0, path=Path("/tmp/fail.wav"))
+        setattr(
+            subject,
+            "_transcriber",
+            SimpleNamespace(
+                transcribe=lambda _path, *, output_target, hotwords: (_ for _ in ()).throw(
+                    BackendUnavailableError(
+                        backend_id="funasr_enhanced",
+                        reason="funasr package is not installed",
+                    )
+                )
+            ),
+        )
+        setattr(
+            subject,
+            "_dictionary_service",
+            SimpleNamespace(
+                hotword_phrases=lambda scope: [("codex", 8)],
+                normalize=lambda text, *, scope: text,
+            ),
+        )
+        setattr(
+            subject,
+            "_output",
+            SimpleNamespace(
+                send_to_openclaw_result=lambda _text: SimpleNamespace(
+                    route="openclaw", reason="ok"
+                ),
+                inject_or_clipboard=lambda _text, auto_paste: "typed",
+            ),
+        )
+        setattr(subject, "_config", SimpleNamespace(auto_paste=False))
+        setattr(subject, "_transcribe_lock", threading.Lock())
+        setattr(subject, "_workers_lock", threading.Lock())
+        setattr(subject, "_workers", set())
+        setattr(subject, "_safe_unlink", lambda _path: None)
+
+        transcribe_and_output = cast(
+            Callable[[object, str], None],
+            getattr(subject, "_transcribe_and_output"),
+        )
+
+        with self.assertLogs("vibemouse.core.app", level="ERROR") as captured:
+            transcribe_and_output(recording, "openclaw")
+
+        self.assertTrue(
+            any(
+                "backend unavailable" in entry.lower()
+                and "funasr package is not installed" in entry
+                for entry in captured.output
+            )
+        )
 
 
 class VoiceMouseAppPrewarmTests(unittest.TestCase):
@@ -574,7 +711,17 @@ class VoiceMouseAppLoggingTests(unittest.TestCase):
             subject,
             "_transcriber",
             SimpleNamespace(
-                transcribe=lambda _path: (_ for _ in ()).throw(RuntimeError("boom"))
+                transcribe=lambda _path, *, output_target, hotwords: (_ for _ in ()).throw(
+                    RuntimeError("boom")
+                )
+            ),
+        )
+        setattr(
+            subject,
+            "_dictionary_service",
+            SimpleNamespace(
+                hotword_phrases=lambda scope: [],
+                normalize=lambda text, *, scope: text,
             ),
         )
         setattr(

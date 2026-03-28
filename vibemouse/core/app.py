@@ -9,6 +9,7 @@ from typing import Literal
 
 from vibemouse.bindings.actions import command_for_legacy_gesture_action
 from vibemouse.bindings.resolver import BindingResolver
+from vibemouse.core.backends import BackendUnavailableError
 from vibemouse.core.audio import AudioRecorder, AudioRecording
 from vibemouse.core.commands import (
     COMMAND_NOOP,
@@ -25,6 +26,7 @@ from vibemouse.core.commands import (
     gesture_direction_to_event,
 )
 from vibemouse.config import AppConfig, load_config, write_status
+from vibemouse.core.dictionary import DictionaryService
 from vibemouse.core.output import TextOutput
 from vibemouse.core.transcriber import SenseVoiceTranscriber
 from vibemouse.ipc.server import AgentCommandServer, IPCServer
@@ -366,12 +368,19 @@ class VoiceMouseApp:
             _LOG.info(
                 "Recording stopped (%.1fs), transcribing...", recording.duration_s
             )
+            hotwords = self._dictionary_service.hotword_phrases(output_target)
             with self._transcribe_lock:
-                text = self._transcriber.transcribe(recording.path)
+                text = self._transcriber.transcribe(
+                    recording.path,
+                    output_target=output_target,
+                    hotwords=hotwords,
+                )
 
             if not text:
                 _LOG.info("No speech recognized")
                 return
+
+            text = self._dictionary_service.normalize(text, scope=output_target)
 
             if output_target == "openclaw":
                 dispatch = self._output.send_to_openclaw_result(text)
@@ -386,25 +395,29 @@ class VoiceMouseApp:
 
             device = self._transcriber.device_in_use
             backend = self._transcriber.backend_in_use
+            profile = getattr(self._transcriber, "profile_in_use", "unknown")
 
             if output_target == "openclaw":
                 if route == "openclaw":
                     _LOG.info(
-                        "Transcribed with %s on %s, sent to OpenClaw (%s)",
+                        "Transcribed with profile=%s backend=%s on %s, sent to OpenClaw (%s)",
+                        profile,
                         backend,
                         device,
                         dispatch_reason,
                     )
                 elif route == "clipboard":
                     _LOG.warning(
-                        "Transcribed with %s on %s, OpenClaw unavailable so copied to clipboard (%s)",
+                        "Transcribed with profile=%s backend=%s on %s, OpenClaw unavailable so copied to clipboard (%s)",
+                        profile,
                         backend,
                         device,
                         dispatch_reason,
                     )
                 else:
                     _LOG.warning(
-                        "Transcribed with %s on %s, but OpenClaw output was empty (%s)",
+                        "Transcribed with profile=%s backend=%s on %s, but OpenClaw output was empty (%s)",
+                        profile,
                         backend,
                         device,
                         dispatch_reason,
@@ -413,24 +426,38 @@ class VoiceMouseApp:
 
             if route == "typed":
                 _LOG.info(
-                    "Transcribed with %s on %s, typed into focused input",
+                    "Transcribed with profile=%s backend=%s on %s, typed into focused input",
+                    profile,
                     backend,
                     device,
                 )
             elif route == "pasted":
                 _LOG.info(
-                    "Transcribed with %s on %s, pasted via system shortcut",
+                    "Transcribed with profile=%s backend=%s on %s, pasted via system shortcut",
+                    profile,
                     backend,
                     device,
                 )
             elif route == "clipboard":
                 _LOG.info(
-                    "Transcribed with %s on %s, copied to clipboard", backend, device
+                    "Transcribed with profile=%s backend=%s on %s, copied to clipboard",
+                    profile,
+                    backend,
+                    device,
                 )
             else:
                 _LOG.warning(
-                    "Transcribed with %s on %s, but output was empty", backend, device
+                    "Transcribed with profile=%s backend=%s on %s, but output was empty",
+                    profile,
+                    backend,
+                    device,
                 )
+        except BackendUnavailableError as error:
+            _LOG.error(
+                "Transcription backend unavailable for target=%s: %s",
+                output_target,
+                error,
+            )
         except Exception as error:
             _LOG.exception("Transcription failed: %s", error)
         finally:
@@ -509,6 +536,7 @@ class VoiceMouseApp:
             temp_dir=config.temp_dir,
         )
         self._transcriber = SenseVoiceTranscriber(config)
+        self._dictionary_service = DictionaryService(config.dictionary)
         self._output = TextOutput(
             system_integration=self._system_integration,
             openclaw_command=config.openclaw_command,
