@@ -89,6 +89,12 @@ async function saveConfig() {
   });
   renderProfiles();
   renderDictionary();
+  try {
+    await loadStatus();
+  } catch (error) {
+    setNotice(`Settings saved, but status refresh failed: ${error.message}`, "error");
+    return;
+  }
   setNotice("Settings saved.", "success");
 }
 
