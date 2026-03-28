@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VibeMouse Settings</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="hero">
+        <p class="eyebrow">Local Dictation Control</p>
+        <h1>VibeMouse Settings</h1>
+        <p class="lede">
+          Configure Fast and Enhanced dictation modes, manage personal hotwords,
+          and inspect backend readiness without leaving your machine.
+        </p>
+      </header>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Profiles</h2>
+          <button id="save-config" class="button button-primary" type="button">
+            Save Settings
+          </button>
+        </div>
+        <div class="profile-grid">
+          <label class="field">
+            <span>Default target</span>
+            <select id="default-profile">
+              <option value="fast">Fast</option>
+              <option value="enhanced">Enhanced</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>OpenClaw target</span>
+            <select id="openclaw-profile">
+              <option value="fast">Fast</option>
+              <option value="enhanced">Enhanced</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Backend Status</h2>
+          <button id="refresh-status" class="button" type="button">Refresh</button>
+        </div>
+        <div id="backend-status" class="status-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Dictionary</h2>
+          <p class="panel-copy">
+            Phrases bias Enhanced decoding and normalize final text for both targets.
+          </p>
+        </div>
+        <div class="table-wrap">
+          <table id="dictionary-table">
+            <thead>
+              <tr>
+                <th>Term</th>
+                <th>Phrases</th>
+                <th>Weight</th>
+                <th>Scope</th>
+                <th>Enabled</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="dictionary-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Add Entry</h2>
+          <p class="panel-copy">
+            Enter comma-separated phrases. The first matching phrase normalizes to the canonical term.
+          </p>
+        </div>
+        <form id="dictionary-form" class="form-grid">
+          <label class="field">
+            <span>Canonical term</span>
+            <input id="entry-term" name="term" type="text" required />
+          </label>
+          <label class="field">
+            <span>Phrases</span>
+            <input
+              id="entry-phrases"
+              name="phrases"
+              type="text"
+              placeholder="codex, code x, 扣带思"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>Weight</span>
+            <input id="entry-weight" name="weight" type="number" min="1" max="10" value="8" required />
+          </label>
+          <label class="field">
+            <span>Scope</span>
+            <select id="entry-scope" name="scope">
+              <option value="both">Both</option>
+              <option value="default">Default</option>
+              <option value="openclaw">OpenClaw</option>
+            </select>
+          </label>
+          <label class="field field-checkbox">
+            <input id="entry-enabled" name="enabled" type="checkbox" checked />
+            <span>Enabled</span>
+          </label>
+          <div class="form-actions">
+            <button class="button button-primary" type="submit">Add Entry</button>
+          </div>
+        </form>
+      </section>
+
+      <p id="notice" class="notice" role="status"></p>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
