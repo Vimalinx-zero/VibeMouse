@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import webbrowser
 
 from vibemouse.config import load_config
 from vibemouse.config.store import resolve_config_path
@@ -8,6 +9,7 @@ from vibemouse.core.app import VoiceMouseApp
 from vibemouse.core.logging_setup import configure_logging
 from vibemouse.ops.deploy import configure_deploy_parser, run_deploy
 from vibemouse.ops.doctor import run_doctor
+from vibemouse.settings import SettingsServer
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -50,6 +52,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="generate service/env files and deploy as user service",
     )
     configure_deploy_parser(deploy_parser)
+
+    settings_parser = subparsers.add_parser(
+        "settings",
+        help="run the local settings web UI",
+    )
+    settings_parser.add_argument("--config", default=None, help="path to config.json")
+    settings_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="host interface for the local settings server",
+    )
+    settings_parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="port for the local settings server",
+    )
+    settings_parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="open the settings page in the default browser",
+    )
     return parser
 
 
@@ -66,6 +90,24 @@ def main(argv: list[str] | None = None) -> int:
         return run_doctor(apply_fixes=apply_fixes)
     if command == "deploy":
         return run_deploy(args)
+    if command == "settings":
+        resolved_path = resolve_config_path(getattr(args, "config", None))
+        configure_logging("INFO")
+        server = SettingsServer(
+            config_path=resolved_path,
+            host=getattr(args, "host", "127.0.0.1"),
+            port=int(getattr(args, "port", 8765)),
+        )
+        server.start()
+        if bool(getattr(args, "open_browser", False)):
+            webbrowser.open(f"{server.base_url}/", new=2)
+        try:
+            server.wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.stop()
+        return 0
 
     if command == "listener":
         listener_cmd = getattr(args, "listener_command", None)

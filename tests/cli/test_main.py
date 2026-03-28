@@ -98,3 +98,36 @@ class MainEntryTests(unittest.TestCase):
         self.assertEqual(rc, 5)
         self.assertEqual(run_deploy.call_count, 1)
         self.assertEqual(load_config.call_count, 0)
+
+    def test_settings_command_starts_local_settings_server(self) -> None:
+        server = MagicMock()
+        server.base_url = "http://127.0.0.1:8765"
+        with (
+            patch(
+                "vibemouse.main.resolve_config_path",
+                return_value="/tmp/settings-config.json",
+            ),
+            patch("vibemouse.main.SettingsServer", return_value=server) as server_ctor,
+            patch("vibemouse.main.webbrowser.open") as open_browser,
+        ):
+            rc = main(
+                [
+                    "settings",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "8765",
+                    "--open-browser",
+                ]
+            )
+
+        self.assertEqual(rc, 0)
+        server_ctor.assert_called_once_with(
+            config_path="/tmp/settings-config.json",
+            host="127.0.0.1",
+            port=8765,
+        )
+        server.start.assert_called_once_with()
+        server.wait.assert_called_once_with()
+        server.stop.assert_called_once_with()
+        open_browser.assert_called_once_with("http://127.0.0.1:8765/", new=2)
