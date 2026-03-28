@@ -6,6 +6,7 @@ from pathlib import Path
 from vibemouse.config.env_overrides import apply_env_overrides
 from vibemouse.config.schema import (
     AppConfig,
+    DictionaryEntry,
     build_default_config_document,
     config_document_to_app_config,
     default_config_path,
@@ -34,6 +35,7 @@ def write_status(path: str | Path, payload: Mapping[str, object]) -> None:
 __all__ = [
     "AppConfig",
     "ConfigStore",
+    "DictionaryEntry",
     "StatusStore",
     "build_default_config_document",
     "config_document_to_app_config",

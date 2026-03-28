@@ -1,5 +1,18 @@
 {
   "schema_version": 1,
+  "profiles": {
+    "default": "fast",
+    "openclaw": "enhanced"
+  },
+  "dictionary": [
+    {
+      "term": "Codex",
+      "phrases": ["codex", "code x", "扣带思"],
+      "weight": 8,
+      "scope": "both",
+      "enabled": true
+    }
+  ],
   "bindings": {
     "mouse.side_front.press": "toggle_recording",
     "mouse.side_rear.press": "trigger_secondary_action",

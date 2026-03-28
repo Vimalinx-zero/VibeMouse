@@ -22,6 +22,11 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertEqual(config.rear_button, "x2")
         self.assertEqual(config.record_hotkey_keycodes, (42, 125, 193))
         self.assertEqual(config.status_file.name, "vibemouse-status.json")
+        self.assertEqual(
+            config.profiles,
+            {"default": "fast", "openclaw": "enhanced"},
+        )
+        self.assertEqual(config.dictionary, ())
 
     def test_json_config_values_are_loaded(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vibemouse-config-") as tmp:
@@ -30,6 +35,19 @@ class ConfigStoreTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": 1,
+                        "profiles": {
+                            "default": "enhanced",
+                            "openclaw": "fast",
+                        },
+                        "dictionary": [
+                            {
+                                "term": "Codex",
+                                "phrases": ["codex", "code x"],
+                                "weight": 8,
+                                "scope": "both",
+                                "enabled": True,
+                            }
+                        ],
                         "bindings": {
                             "mouse.side_front.press": "send_enter",
                         },
@@ -71,6 +89,13 @@ class ConfigStoreTests(unittest.TestCase):
             config.bindings,
             {"mouse.side_front.press": "send_enter"},
         )
+        self.assertEqual(
+            config.profiles,
+            {"default": "enhanced", "openclaw": "fast"},
+        )
+        self.assertEqual(len(config.dictionary), 1)
+        self.assertEqual(config.dictionary[0].term, "Codex")
+        self.assertEqual(config.dictionary[0].phrases, ("codex", "code x"))
         self.assertTrue(config.auto_paste)
         self.assertEqual(config.enter_mode, "ctrl_enter")
         self.assertEqual(config.log_level, "ERROR")
@@ -128,6 +153,18 @@ class ConfigStoreTests(unittest.TestCase):
             store.save_document(
                 {
                     "schema_version": 1,
+                    "profiles": {
+                        "default": "enhanced",
+                    },
+                    "dictionary": [
+                        {
+                            "term": "Codex",
+                            "phrases": ["codex", "code x"],
+                            "weight": 8,
+                            "scope": "openclaw",
+                            "enabled": True,
+                        }
+                    ],
                     "bindings": {
                         "mouse.side_front.press": "send_enter",
                     },
@@ -142,6 +179,22 @@ class ConfigStoreTests(unittest.TestCase):
             payload = json.loads(config_path.read_text(encoding="utf-8"))
 
         self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(
+            payload["profiles"],
+            {"default": "enhanced", "openclaw": "enhanced"},
+        )
+        self.assertEqual(
+            payload["dictionary"],
+            [
+                {
+                    "enabled": True,
+                    "phrases": ["codex", "code x"],
+                    "scope": "openclaw",
+                    "term": "Codex",
+                    "weight": 8,
+                }
+            ],
+        )
         self.assertEqual(
             payload["bindings"],
             {"mouse.side_front.press": "send_enter"},

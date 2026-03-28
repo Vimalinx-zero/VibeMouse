@@ -26,11 +26,27 @@ _ENTER_MODE_CHOICES = {"enter", "ctrl_enter", "shift_enter", "none"}
 _LOG_LEVEL_CHOICES = {"debug", "info", "warning", "error", "critical"}
 _STATUS_STATE_CHOICES = {"idle", "recording", "processing"}
 _LISTENER_MODE_CHOICES = {"inline", "child", "off"}
+_PROFILE_TARGET_CHOICES = {"default", "openclaw"}
+_PROFILE_MODE_CHOICES = {"fast", "enhanced"}
+_DICTIONARY_SCOPE_CHOICES = {"default", "openclaw", "both"}
+_DICTIONARY_WEIGHT_MIN = 1
+_DICTIONARY_WEIGHT_MAX = 10
+
+
+@dataclass(frozen=True)
+class DictionaryEntry:
+    term: str
+    phrases: tuple[str, ...]
+    weight: int
+    scope: str
+    enabled: bool
 
 
 @dataclass(frozen=True)
 class AppConfig:
     bindings: dict[str, str]
+    profiles: dict[str, str]
+    dictionary: tuple[DictionaryEntry, ...]
     sample_rate: int
     channels: int
     dtype: str
@@ -100,6 +116,11 @@ def build_default_config_document() -> dict[str, object]:
     return {
         "schema_version": LATEST_CONFIG_SCHEMA_VERSION,
         "bindings": {},
+        "profiles": {
+            "default": "fast",
+            "openclaw": "enhanced",
+        },
+        "dictionary": [],
         "transcriber": {
             "sample_rate": 16000,
             "channels": 1,
@@ -159,6 +180,7 @@ def build_default_config_document() -> dict[str, object]:
 def config_document_to_app_config(document: Mapping[str, object]) -> AppConfig:
     normalized = normalize_config_document(document)
     bindings = _expect_mapping(normalized, "bindings")
+    profiles = _expect_mapping(normalized, "profiles")
     transcriber = _expect_mapping(normalized, "transcriber")
     input_section = _expect_mapping(normalized, "input")
     output = _expect_mapping(normalized, "output")
@@ -169,6 +191,17 @@ def config_document_to_app_config(document: Mapping[str, object]) -> AppConfig:
 
     return AppConfig(
         bindings={str(key): str(value) for key, value in bindings.items()},
+        profiles={str(key): str(value) for key, value in profiles.items()},
+        dictionary=tuple(
+            DictionaryEntry(
+                term=str(entry["term"]),
+                phrases=tuple(str(phrase) for phrase in _expect_list(entry, "phrases")),
+                weight=int(entry["weight"]),
+                scope=str(entry["scope"]),
+                enabled=bool(entry["enabled"]),
+            )
+            for entry in _expect_mapping_list(normalized, "dictionary")
+        ),
         sample_rate=int(transcriber["sample_rate"]),
         channels=int(transcriber["channels"]),
         dtype=str(transcriber["dtype"]),
@@ -222,6 +255,8 @@ def normalize_config_document(document: Mapping[str, object]) -> dict[str, objec
     allowed_top_level = {
         "schema_version",
         "bindings",
+        "profiles",
+        "dictionary",
         "transcriber",
         "input",
         "output",
@@ -248,6 +283,12 @@ def normalize_config_document(document: Mapping[str, object]) -> dict[str, objec
     normalized: dict[str, object] = copy.deepcopy(defaults)
     normalized["schema_version"] = schema_version
     normalized["bindings"] = _normalize_bindings(document.get("bindings", {}))
+    normalized["profiles"] = _normalize_profiles_section(
+        _merge_section(defaults, document, "profiles")
+    )
+    normalized["dictionary"] = _normalize_dictionary_entries(
+        document.get("dictionary", defaults["dictionary"])
+    )
     normalized["transcriber"] = _normalize_transcriber_section(
         _merge_section(defaults, document, "transcriber")
     )
@@ -411,6 +452,75 @@ def _normalize_transcriber_section(section: Mapping[str, object]) -> dict[str, o
     }
 
 
+def _normalize_profiles_section(section: Mapping[str, object]) -> dict[str, object]:
+    expected_targets = set(section.keys())
+    if expected_targets != _PROFILE_TARGET_CHOICES:
+        missing = _PROFILE_TARGET_CHOICES - expected_targets
+        unknown = expected_targets - _PROFILE_TARGET_CHOICES
+        details: list[str] = []
+        if missing:
+            details.append(f"missing {', '.join(sorted(missing))}")
+        if unknown:
+            details.append(f"unknown {', '.join(sorted(unknown))}")
+        raise ValueError("profiles must define default and openclaw targets" + (
+            f" ({'; '.join(details)})" if details else ""
+        ))
+
+    return {
+        target: _coerce_choice(
+            section[target],
+            f"profiles.{target}",
+            _PROFILE_MODE_CHOICES,
+        )
+        for target in sorted(_PROFILE_TARGET_CHOICES)
+    }
+
+
+def _normalize_dictionary_entries(raw: object) -> list[dict[str, object]]:
+    if not isinstance(raw, list | tuple):
+        raise ValueError("dictionary must be a list")
+
+    normalized: list[dict[str, object]] = []
+    for index, entry in enumerate(raw):
+        item = _expect_mapping_value(entry, f"dictionary[{index}]")
+        unknown_keys = set(item.keys()) - {"term", "phrases", "weight", "scope", "enabled"}
+        if unknown_keys:
+            names = ", ".join(sorted(unknown_keys))
+            raise ValueError(f"Unknown dictionary[{index}] field(s): {names}")
+
+        phrases_raw = item.get("phrases")
+        if not isinstance(phrases_raw, list):
+            raise ValueError(f"dictionary[{index}].phrases must be a list")
+
+        phrases = [
+            _coerce_non_empty_string(phrase, f"dictionary[{index}].phrases[{phrase_index}]")
+            for phrase_index, phrase in enumerate(phrases_raw)
+        ]
+        if not phrases:
+            raise ValueError(f"dictionary[{index}].phrases must contain at least one value")
+
+        normalized.append(
+            {
+                "term": _coerce_non_empty_string(item.get("term"), f"dictionary[{index}].term"),
+                "phrases": phrases,
+                "weight": _coerce_bounded_int(
+                    item.get("weight"),
+                    f"dictionary[{index}].weight",
+                    minimum=_DICTIONARY_WEIGHT_MIN,
+                    maximum=_DICTIONARY_WEIGHT_MAX,
+                ),
+                "scope": _coerce_choice(
+                    item.get("scope"),
+                    f"dictionary[{index}].scope",
+                    _DICTIONARY_SCOPE_CHOICES,
+                ),
+                "enabled": _coerce_bool(item.get("enabled"), f"dictionary[{index}].enabled"),
+            }
+        )
+
+    return normalized
+
+
 def _normalize_input_section(section: Mapping[str, object]) -> dict[str, object]:
     front_button = _coerce_choice(
         section["front_button"], "input.front_button", _BUTTON_CHOICES
@@ -557,6 +667,16 @@ def _expect_list(source: Mapping[str, object], key: str) -> list[object]:
     return raw
 
 
+def _expect_mapping_list(source: Mapping[str, object], key: str) -> list[dict[str, object]]:
+    raw = source.get(key)
+    if not isinstance(raw, list):
+        raise ValueError(f"{key} must be a list")
+    return [
+        _expect_mapping_value(value, f"{key}[{index}]")
+        for index, value in enumerate(raw)
+    ]
+
+
 def _coerce_bool(raw: object, name: str) -> bool:
     if not isinstance(raw, bool):
         raise ValueError(f"{name} must be a boolean")
@@ -576,6 +696,21 @@ def _coerce_non_negative_int(raw: object, name: str) -> int:
     if raw < 0:
         raise ValueError(f"{name} must be a non-negative integer")
     return raw
+
+
+def _coerce_bounded_int(
+    raw: object,
+    name: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = _coerce_non_negative_int(raw, name)
+    if value < minimum or value > maximum:
+        raise ValueError(
+            f"{name} must be between {minimum} and {maximum}"
+        )
+    return value
 
 
 def _coerce_positive_float(raw: object, name: str) -> float:

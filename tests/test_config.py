@@ -4,10 +4,49 @@ import os
 import unittest
 from unittest.mock import patch
 
-from vibemouse.config import load_config
+from vibemouse.config import (
+    build_default_config_document,
+    config_document_to_app_config,
+    load_config,
+)
 
 
 class LoadConfigTests(unittest.TestCase):
+    def test_default_config_contains_profiles_and_dictionary(self) -> None:
+        document = build_default_config_document()
+
+        self.assertEqual(
+            document["profiles"],
+            {"default": "fast", "openclaw": "enhanced"},
+        )
+        self.assertEqual(document["dictionary"], [])
+
+    def test_config_document_to_app_config_reads_profiles_and_dictionary(self) -> None:
+        document = build_default_config_document()
+        document["profiles"]["default"] = "enhanced"
+        document["dictionary"] = [
+            {
+                "term": "Codex",
+                "phrases": ["codex", "code x"],
+                "weight": 8,
+                "scope": "both",
+                "enabled": True,
+            }
+        ]
+
+        config = config_document_to_app_config(document)
+
+        self.assertEqual(
+            config.profiles,
+            {"default": "enhanced", "openclaw": "enhanced"},
+        )
+        self.assertEqual(len(config.dictionary), 1)
+        self.assertEqual(config.dictionary[0].term, "Codex")
+        self.assertEqual(config.dictionary[0].phrases, ("codex", "code x"))
+        self.assertEqual(config.dictionary[0].weight, 8)
+        self.assertEqual(config.dictionary[0].scope, "both")
+        self.assertTrue(config.dictionary[0].enabled)
+
     def test_defaults_disable_trust_remote_code(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             config = load_config()
@@ -38,6 +77,11 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config.record_hotkey_keycodes, (42, 125, 193))
         self.assertIsNone(config.recording_submit_keycode)
         self.assertEqual(config.bindings, {})
+        self.assertEqual(
+            config.profiles,
+            {"default": "fast", "openclaw": "enhanced"},
+        )
+        self.assertEqual(config.dictionary, ())
 
     def test_record_hotkey_keycodes_can_be_configured(self) -> None:
         with patch.dict(
