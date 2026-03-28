@@ -11,6 +11,13 @@
       "weight": 8,
       "scope": "both",
       "enabled": true
+    },
+    {
+      "term": "Claude Code",
+      "phrases": ["claude code", "cloud code"],
+      "weight": 7,
+      "scope": "openclaw",
+      "enabled": true
     }
   ],
   "bindings": {

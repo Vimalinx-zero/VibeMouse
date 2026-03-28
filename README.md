@@ -76,6 +76,74 @@ Default install is ONNX-first for smaller deployment footprint.
 - Optional PyTorch backend (GPU/advanced fallback): `pip install -e ".[pt]"`
 - Optional Intel NPU dependencies: `pip install -e ".[npu]"`
 
+## Dictation Profiles And Dictionary
+
+VibeMouse now exposes two user-facing dictation modes instead of raw model names:
+- `Fast`: lower latency, stable daily driver, current SenseVoice path
+- `Enhanced`: accuracy-first path, forwards weighted hotwords into the FunASR backend
+
+Profiles are assigned per output target:
+- `default`
+- `openclaw`
+
+Dictionary entries are shared across both targets and use this shape:
+
+```json
+{
+  "term": "Codex",
+  "phrases": ["codex", "code x", "扣带思"],
+  "weight": 8,
+  "scope": "both",
+  "enabled": true
+}
+```
+
+Behavior:
+- `Enhanced` uses `phrases` + `weight` for hotword biasing during decoding
+- both `Fast` and `Enhanced` normalize matched phrases back to the canonical `term`
+- `scope` can be `default`, `openclaw`, or `both`
+- if `Enhanced` is unavailable, VibeMouse reports the failure explicitly instead of silently downgrading
+
+See [`shared/examples/config.example.json`](./shared/examples/config.example.json) for a complete example.
+
+## Settings UI
+
+Run the local settings UI:
+
+```bash
+vibemouse settings --open-browser
+```
+
+If you do not want to auto-open the browser:
+
+```bash
+vibemouse settings
+```
+
+The UI lets you:
+- switch `default` / `openclaw` between `Fast` and `Enhanced`
+- add, edit, enable, or disable dictionary entries
+- inspect backend availability and dependency errors
+
+## Dictation Evaluation Harness
+
+To compare profile behavior on your own recordings, create a JSONL fixture like
+[`shared/examples/dictation_eval.jsonl`](./shared/examples/dictation_eval.jsonl) and run:
+
+```bash
+python scripts/eval_dictation_profiles.py \
+  --dataset shared/examples/dictation_eval.jsonl \
+  --profile fast \
+  --profile enhanced
+```
+
+The script reports:
+- exact text match rate
+- dictionary term hit rate
+- backend availability / unavailability reasons
+
+The example fixture uses placeholder audio paths. Replace them with real local WAV paths before running the script.
+
 ### One-command auto deploy (recommended)
 
 ```bash
@@ -200,7 +268,7 @@ tail -f ~/.local/state/vibemouse/service.log
 | `VIBEMOUSE_PREWARM_DELAY_S` | `0.0` | Delay ASR prewarm after startup to improve initial responsiveness |
 | `VIBEMOUSE_STATUS_FILE` | `$XDG_RUNTIME_DIR/vibemouse-status.json` | Runtime status for bars/widgets |
 
-Full configuration source of truth: `vibemouse/config.py`.
+Full configuration source of truth: `vibemouse/config/schema.py`.
 
 ## Troubleshooting Shortlist
 

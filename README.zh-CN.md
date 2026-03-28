@@ -76,6 +76,75 @@ vibemouse
 - 可选 PyTorch 后端（GPU/高级兜底）：`pip install -e ".[pt]"`
 - 可选 Intel NPU 依赖：`pip install -e ".[npu]"`
 
+## 转写档位与个人词典
+
+VibeMouse 现在对外只暴露两种用户可理解的转写档位，而不是直接暴露底层模型名：
+- `Fast`：低延迟、适合日常常驻，走当前 SenseVoice 路径
+- `Enhanced`：准确率优先，把加权热词传给 FunASR 后端
+
+档位按输出目标分别配置：
+- `default`
+- `openclaw`
+
+个人词典条目结构如下：
+
+```json
+{
+  "term": "Codex",
+  "phrases": ["codex", "code x", "扣带思"],
+  "weight": 8,
+  "scope": "both",
+  "enabled": true
+}
+```
+
+行为规则：
+- `Enhanced` 会把 `phrases` 和 `weight` 作为解码热词偏置
+- `Fast` 和 `Enhanced` 都会在转写后把命中的短语规范化回 `term`
+- `scope` 可选 `default`、`openclaw` 或 `both`
+- 如果 `Enhanced` 当前不可用，运行时会明确报错，不会偷偷降级
+
+完整示例可参考 [`shared/examples/config.example.json`](./shared/examples/config.example.json)。
+
+## 本地设置界面
+
+启动本地设置页：
+
+```bash
+vibemouse settings --open-browser
+```
+
+如果不想自动打开浏览器：
+
+```bash
+vibemouse settings
+```
+
+这个界面可以：
+- 切换 `default` / `openclaw` 的 `Fast` / `Enhanced`
+- 增删改查词典条目，并启用或禁用
+- 查看后端可用性与依赖缺失原因
+
+## 转写评测脚本
+
+如果你想拿自己的录音真实比对不同档位，可以先按
+[`shared/examples/dictation_eval.jsonl`](./shared/examples/dictation_eval.jsonl)
+准备 JSONL 样例，然后运行：
+
+```bash
+python scripts/eval_dictation_profiles.py \
+  --dataset shared/examples/dictation_eval.jsonl \
+  --profile fast \
+  --profile enhanced
+```
+
+脚本会输出：
+- 文本完全匹配率
+- 词典术语命中率
+- 后端可用性与不可用原因
+
+示例文件里的音频路径只是占位符，真正运行前要替换成你本地的 WAV 文件路径。
+
 ### 一键自动部署（推荐）
 
 ```bash
@@ -200,7 +269,7 @@ tail -f ~/.local/state/vibemouse/service.log
 | `VIBEMOUSE_PREWARM_DELAY_S` | `0.0` | 启动后延迟执行 ASR 预热，改善初始响应速度 |
 | `VIBEMOUSE_STATUS_FILE` | `$XDG_RUNTIME_DIR/vibemouse-status.json` | 运行状态文件（状态栏读取） |
 
-完整配置以 `vibemouse/config.py` 为准。
+完整配置以 `vibemouse/config/schema.py` 为准。
 
 ## 故障排查（短版）
 

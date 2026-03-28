@@ -111,6 +111,11 @@ class _Server(ThreadingHTTPServer):
 def _build_handler(settings_server: SettingsServer) -> type[BaseHTTPRequestHandler]:
     class SettingsHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
+            if self.path == "/favicon.ico":
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if self.path in {"/", "/index.html", "/app.js", "/styles.css"}:
                 self._send_static(self.path)
                 return

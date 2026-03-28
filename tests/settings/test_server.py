@@ -32,6 +32,11 @@ def _request_text(url: str) -> str:
         return response.read().decode("utf-8")
 
 
+def _request_raw(url: str) -> tuple[int, bytes]:
+    with urlopen(url, timeout=5) as response:
+        return response.status, response.read()
+
+
 class _FakeStatusTranscriber:
     def availability(self, *, output_target: str = "default") -> BackendStatus:
         if output_target == "default":
@@ -48,6 +53,19 @@ class _FakeStatusTranscriber:
 
 
 class SettingsServerTests(unittest.TestCase):
+    def test_favicon_request_returns_no_content(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="vibemouse-settings-") as tmp:
+            config_path = Path(tmp) / "config.json"
+            server = SettingsServer(config_path=config_path)
+            server.start()
+            try:
+                status_code, body = _request_raw(f"{server.base_url}/favicon.ico")
+            finally:
+                server.stop()
+
+        self.assertEqual(status_code, 204)
+        self.assertEqual(body, b"")
+
     def test_root_serves_settings_page(self) -> None:
         with tempfile.TemporaryDirectory(prefix="vibemouse-settings-") as tmp:
             config_path = Path(tmp) / "config.json"
